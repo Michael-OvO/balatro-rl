@@ -1,0 +1,37 @@
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+.eggs/
+build/
+dist/
+.venv/
+venv/
+env/
+.python-version
+
+# JAX / ML
+*.ckpt
+*.orbax-checkpoint*
+checkpoints/
+runs/
+wandb/
+trackio/
+*.npz
+*.npy
+*.pkl
+
+# Replays / artifacts (keep these out of git; they regenerate from (seed, actions))
+replays/
+artifacts/
+*.log
+
+# Parity corpus is large — track via DVC/LFS or regenerate; ignore raw dumps by default
+tests/golden/_dumps/
+
+# OS / editor
+.DS_Store
+.idea/
+.vscode/
+*.swp
+.ipynb_checkpoints/
