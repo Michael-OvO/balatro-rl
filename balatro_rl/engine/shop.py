@@ -11,9 +11,6 @@ from .jokers.base import REGISTRY, JokerState, JokerType, Rarity
 CARD_SLOTS = 2
 REROLL_BASE = 5
 
-# Joker-rarity distribution once a Joker rolls (Common 70 / Uncommon 25 / Rare 5).
-_RARITY_THRESHOLDS = ((Rarity.RARE, 0.05), (Rarity.UNCOMMON, 0.30))  # else COMMON
-
 
 def joker_cost(jtype: JokerType) -> int:
     return REGISTRY[jtype].cost

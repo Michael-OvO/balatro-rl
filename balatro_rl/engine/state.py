@@ -36,6 +36,6 @@ class GameState:
     phase: Phase
     done: bool
     won: bool
-    jokers: tuple = ()   # tuple[JokerState, ...]; empty until acquired (shop is a later plan)
+    jokers: tuple = ()   # tuple[JokerState, ...]; acquired via the shop
     shop_offers: tuple = ()   # tuple[JokerState, ...] offered in the shop
     rerolls_done: int = 0      # rerolls used in the current shop (for reroll cost)

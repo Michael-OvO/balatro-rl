@@ -4,8 +4,9 @@ step(state, action) -> (state', info) is a pure function (RNG rides inside the
 state). Action = (Verb, tuple-of-hand-indices). The flat-id encoding + legal mask
 used by the RL agent live in the env layer (Plan 3); here we use plain tuples.
 
-Tier-0 has no shop: clearing a blind advances directly to the next blind with a
-freshly shuffled deck and full hand. Shop/economy arrive in Plan 2.
+Clearing a blind routes: clear -> win-check (Ante-8 boss -> WON) -> cash-out
+(blind reward + interest + leftover hands + joker on_round_end) -> SHOP phase
+(buy/sell/reroll/reorder/leave) -> _advance_blind -> next blind.
 """
 from __future__ import annotations
 
@@ -200,6 +201,7 @@ def _shop_step(state: GameState, action):
         return _advance_blind(state)
     if verb == Verb.BUY:
         i = action[1]
+        assert 0 <= i < len(state.shop_offers), "no such shop offer"
         offer = state.shop_offers[i]
         cost = joker_cost(offer.type)
         assert state.money >= cost, "cannot afford"
@@ -210,6 +212,7 @@ def _shop_step(state: GameState, action):
         return nxt, {"verb": "buy", "joker": int(offer.type), "cost": cost}
     if verb == Verb.SELL:
         i = action[1]
+        assert 0 <= i < len(state.jokers), "no such joker"
         js = state.jokers[i]
         value = sell_value(js.type, js.sell_bonus)
         jokers = tuple(j for k, j in enumerate(state.jokers) if k != i)
@@ -224,6 +227,7 @@ def _shop_step(state: GameState, action):
         return nxt, {"verb": "reroll", "cost": cost}
     if verb == Verb.REORDER:
         i, j = action[1]
+        assert 0 <= i < len(state.jokers) and 0 <= j < len(state.jokers), "reorder index out of range"
         jk = list(state.jokers)
         item = jk.pop(i)
         jk.insert(j, item)
