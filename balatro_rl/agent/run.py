@@ -5,7 +5,7 @@ from __future__ import annotations
 
 import dataclasses
 
-from .metrics_logger import NullLogger, TrackioLogger
+from .metrics_logger import ConsoleLogger, MultiLogger, NullLogger, TrackioLogger
 from .train import TrainConfig, TrainResult, train
 
 
@@ -17,7 +17,11 @@ def run_training(cfg: TrainConfig, logger=None) -> TrainResult:
 
 def main():
     cfg = TrainConfig(num_updates=50, num_envs=64, num_steps=128, eval_interval=5)
-    logger = TrackioLogger(project="balatro-rl", name="ppo", config=dataclasses.asdict(cfg))
+    # Stream progress to the terminal AND feed the live Trackio dashboard.
+    logger = MultiLogger(
+        ConsoleLogger(every=1),
+        TrackioLogger(project="balatro-rl", name="ppo", config=dataclasses.asdict(cfg)),
+    )
     result = run_training(cfg, logger=logger)
     print(f"done: {len(result.losses)} updates; "
           f"last eval = {result.eval_history[-1] if result.eval_history else 'n/a'}")
