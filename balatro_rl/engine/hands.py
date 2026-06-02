@@ -12,6 +12,7 @@ from collections import Counter
 from enum import IntEnum
 
 from .cards import Card
+from .jokers.base import RuleFlags, NO_RULES
 
 
 class HandType(IntEnum):
@@ -55,8 +56,17 @@ def _is_straight(ranks: list[int]) -> bool:
     return u == [2, 3, 4, 5, 14]  # Ace-low: A-2-3-4-5
 
 
-def evaluate(cards: list[Card]) -> tuple[HandType, tuple[int, ...]]:
-    """Best (HandType, scoring-card indices) for 1..5 played cards."""
+def is_face(card: Card, rules: RuleFlags = NO_RULES) -> bool:
+    """King/Queen/Jack, or any card when Pareidolia (all_face) is active."""
+    return rules.all_face or card.rank in (11, 12, 13)
+
+
+def evaluate(cards: list[Card], rules: RuleFlags = NO_RULES) -> tuple[HandType, tuple[int, ...]]:
+    """Best (HandType, scoring-card indices) for 1..5 played cards.
+
+    With rules.splash, every played card scores (indices = all), though the hand
+    type is still the best poker hand.
+    """
     n = len(cards)
     if n == 0:
         raise ValueError("evaluate() requires at least one card")
@@ -68,31 +78,36 @@ def evaluate(cards: list[Card]) -> tuple[HandType, tuple[int, ...]]:
     is_straight = n == 5 and _is_straight(ranks)
     all_idx = tuple(range(n))
 
-    def idx_with_count(k: int) -> list[int]:
+    def idx_with_count(k: int) -> tuple[int, ...]:
         targets = {r for r, c in rank_counts.items() if c == k}
-        return [i for i, r in enumerate(ranks) if r in targets]
+        return tuple(i for i, r in enumerate(ranks) if r in targets)
 
     if is_flush and counts == [5]:
-        return HandType.FLUSH_FIVE, all_idx
-    if is_flush and counts == [3, 2]:
-        return HandType.FLUSH_HOUSE, all_idx
-    if counts == [5]:
-        return HandType.FIVE_OF_A_KIND, all_idx
-    if is_flush and is_straight:
-        return HandType.STRAIGHT_FLUSH, all_idx
-    if counts and counts[0] == 4:
-        return HandType.FOUR_OF_A_KIND, tuple(idx_with_count(4))
-    if counts == [3, 2]:
-        return HandType.FULL_HOUSE, all_idx
-    if is_flush:
-        return HandType.FLUSH, all_idx
-    if is_straight:
-        return HandType.STRAIGHT, all_idx
-    if counts and counts[0] == 3:
-        return HandType.THREE_OF_A_KIND, tuple(idx_with_count(3))
-    if counts[:2] == [2, 2]:
-        return HandType.TWO_PAIR, tuple(idx_with_count(2))
-    if counts and counts[0] == 2:
-        return HandType.PAIR, tuple(idx_with_count(2))
-    hi = max(range(n), key=lambda i: ranks[i])
-    return HandType.HIGH_CARD, (hi,)
+        hand_type, idx = HandType.FLUSH_FIVE, all_idx
+    elif is_flush and counts == [3, 2]:
+        hand_type, idx = HandType.FLUSH_HOUSE, all_idx
+    elif counts == [5]:
+        hand_type, idx = HandType.FIVE_OF_A_KIND, all_idx
+    elif is_flush and is_straight:
+        hand_type, idx = HandType.STRAIGHT_FLUSH, all_idx
+    elif counts and counts[0] == 4:
+        hand_type, idx = HandType.FOUR_OF_A_KIND, idx_with_count(4)
+    elif counts == [3, 2]:
+        hand_type, idx = HandType.FULL_HOUSE, all_idx
+    elif is_flush:
+        hand_type, idx = HandType.FLUSH, all_idx
+    elif is_straight:
+        hand_type, idx = HandType.STRAIGHT, all_idx
+    elif counts and counts[0] == 3:
+        hand_type, idx = HandType.THREE_OF_A_KIND, idx_with_count(3)
+    elif counts[:2] == [2, 2]:
+        hand_type, idx = HandType.TWO_PAIR, idx_with_count(2)
+    elif counts and counts[0] == 2:
+        hand_type, idx = HandType.PAIR, idx_with_count(2)
+    else:
+        hi = max(range(n), key=lambda i: ranks[i])
+        hand_type, idx = HandType.HIGH_CARD, (hi,)
+
+    if rules.splash:
+        idx = all_idx
+    return hand_type, idx
