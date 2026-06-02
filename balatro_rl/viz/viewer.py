@@ -54,7 +54,7 @@ _VERB_STYLE = {"PLAY": ("v-play", "#2f7fe0", 22), "DISCARD": ("v-disc", "#6b7280
 _STYLE = """<style>
 .bv{font-family:ui-sans-serif,system-ui,Arial;color:#e8e8ea}
 .bv-banner{display:flex;align-items:center;gap:14px;padding:11px 16px;border-radius:9px;
-  font-size:20px;font-weight:800;color:#fff;box-shadow:0 2px 8px rgba(0,0,0,.25)}
+  font-size:20px;font-weight:800;color:#fff !important;box-shadow:0 2px 8px rgba(0,0,0,.25)}
 .bv-banner .sub{font-size:14px;font-weight:600;opacity:.95}
 .v-play{background:#2f7fe0}.v-disc{background:#6b7280}.v-clear{background:#f59e0b}
 .v-buy{background:#8b5cf6}.v-sell{background:#b45309}.v-shop{background:#7c5cff}
@@ -86,14 +86,14 @@ _STYLE = """<style>
   font-weight:800;color:#fff;padding:1px 5px;border-radius:6px}
 .rb-play{background:#2f7fe0}.rb-disc{background:#6b7280}.rb-new{background:#22a957}
 .jokers{display:flex;gap:6px;margin-bottom:9px;flex-wrap:wrap}
-.jk{font-size:11px;font-weight:700;background:#3a2d5c;color:#fff;padding:3px 8px;border-radius:6px}
+.jk{font-size:11px;font-weight:700;background:#3a2d5c;color:#fff !important;padding:3px 8px;border-radius:6px}
 .jk.add{background:#15803d}.jk.rem{background:#7f1d1d;text-decoration:line-through;opacity:.65}
 .shop{display:flex;gap:8px;flex-wrap:wrap;margin-top:6px}
 .offer{font-size:12px;font-weight:700;background:#2a2540;color:#cbb9ff;
   padding:5px 9px;border-radius:7px;border:1px solid #4c3f7a}
 .offer.target{border:2px solid #f59e0b;color:#ffe2ad}
 .delta{display:flex;justify-content:space-between;font-size:13px;padding:2px 0;border-bottom:1px solid #262a36}
-.up{color:#22c55e;font-weight:800}.down{color:#ef6a5e;font-weight:800}.zero{color:#9aa0b0}
+.up{color:#22c55e !important;font-weight:800}.down{color:#ef6a5e !important;font-weight:800}.zero{color:#9aa0b0 !important}
 .note{font-size:12px;color:#9aa0b0;font-style:italic;padding:6px 0}
 .reel{display:flex;gap:2px;align-items:flex-end;height:38px;padding:6px 4px;
   background:#0f1115;border-radius:8px;overflow-x:auto}
@@ -127,18 +127,25 @@ def _ckey(c):   # identity for the multiset diff; tolerant of missing modifier k
 
 
 def card_html(card: dict, *, state: str = "held", small: bool = False) -> str:
-    """One self-contained card tile. state in held|played|disc|new|left."""
+    """One self-contained card tile. state in held|played|disc|new|left.
+
+    Colours are set INLINE (not via the .red/.blk classes) because Gradio's theme
+    applies a descendant text-colour that overrides class-based colour; inline wins.
+    The suit glyph carries VS15 (&#xFE0E;) to force monochrome TEXT, not an emoji."""
     col = "red" if _is_red(card["suit"]) else "blk"
+    hexc = "#d6453a" if col == "red" else "#141414"
     r = _rank_txt(card["rank"])
-    g = _SUIT_GLYPH[card["suit"]]
+    g = _SUIT_GLYPH[card["suit"]] + "&#xFE0E;"
     cls = {"played": " c-played", "disc": " c-disc", "new": " c-new", "left": " c-left"}.get(state, "")
     rib = {"played": '<span class="ribbon rb-play">PLAY</span>',
            "disc": '<span class="ribbon rb-disc">DISC</span>',
            "new": '<span class="ribbon rb-new">NEW</span>'}.get(state, "")
-    sz = 'style="width:40px;height:56px"' if small else ""
-    return (f'<div class="card{cls}" {sz}>{rib}'
-            f'<div class="r {col}">{r}</div><div class="big {col}">{g}</div>'
-            f'<div class="br {col}">{r}{g}</div></div>')
+    cstyle = "background:#fff !important" + (";width:40px;height:56px" if small else "")
+    tcol = f"color:{hexc} !important"
+    return (f'<div class="card{cls}" style="{cstyle}">{rib}'
+            f'<div class="r {col}" style="{tcol}">{r}</div>'
+            f'<div class="big {col}" style="{tcol}">{g}</div>'
+            f'<div class="br {col}" style="{tcol}">{r}{g}</div></div>')
 
 
 def _delta_row(label, prev, cur, *, money=False):
