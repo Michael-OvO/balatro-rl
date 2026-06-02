@@ -18,11 +18,14 @@ class _Joker(JokerEffect):  # wiki: /w/Joker  — +4 Mult
 
 
 @register(JokerType.CAVENDISH)
-class _Cavendish(JokerEffect):  # wiki: /w/Cavendish  — X3 Mult
+class _Cavendish(JokerEffect):  # wiki: /w/Cavendish  — X3 Mult; 1 in 1000 self-destroy at end of round
     rarity = Rarity.COMMON
     cost = 4
     def independent(self, ctx, js):
         return Effect(xmult=3.0)
+    def on_round_end(self, state, js, rng):
+        roll, rng = rng.random()
+        return js, 0, roll < 0.001, rng
 
 
 @register(JokerType.GREEDY)
@@ -100,3 +103,19 @@ class _RideTheBus(JokerEffect):  # wiki: /w/Ride_the_Bus
 class _Blueprint(JokerEffect):  # wiki: /w/Blueprint  — copy resolution handled in base.resolve_providers
     rarity = Rarity.RARE
     cost = 10
+
+
+@register(JokerType.GOLDEN_JOKER)
+class _GoldenJoker(JokerEffect):  # wiki: /w/Golden_Joker  — +$4 at end of round
+    rarity = Rarity.COMMON
+    cost = 6
+    def on_round_end(self, state, js, rng):
+        return js, 4, False, rng
+
+
+@register(JokerType.EGG)
+class _Egg(JokerEffect):  # wiki: /w/Egg  — gains +$3 sell value at end of round
+    rarity = Rarity.COMMON
+    cost = 4
+    def on_round_end(self, state, js, rng):
+        return dataclasses.replace(js, sell_bonus=js.sell_bonus + 3), 0, False, rng

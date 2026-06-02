@@ -20,6 +20,8 @@ class JokerType(IntEnum):
     SPLASH = 52
     PAREIDOLIA = 37
     BLUEPRINT = 123
+    GOLDEN_JOKER = 90
+    EGG = 46
 
 
 class Rarity(IntEnum):
