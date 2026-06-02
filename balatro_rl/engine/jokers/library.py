@@ -49,3 +49,17 @@ class _Baron(JokerEffect):  # wiki: /w/Baron  — each King held gives X1.5 Mult
 class _Hack(JokerEffect):  # wiki: /w/Hack  — retrigger each played 2,3,4,5
     def retrigger(self, ctx, card, js):
         return 1 if card.rank in (2, 3, 4, 5) else 0
+
+
+@register(JokerType.SPLASH)
+class _Splash(JokerEffect):  # wiki: /w/Splash  — every played card scores
+    copyable = False
+    def rules(self):
+        return RuleFlags(splash=True)
+
+
+@register(JokerType.PAREIDOLIA)
+class _Pareidolia(JokerEffect):  # wiki: /w/Pareidolia  — all cards are face cards
+    copyable = False
+    def rules(self):
+        return RuleFlags(all_face=True)
