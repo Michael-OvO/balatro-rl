@@ -44,20 +44,17 @@ def test_play_consumes_a_hand_and_adds_score():
     assert len(s2.hand) == 8
 
 
-def test_clearing_a_blind_advances_and_resets_counters():
-    # Force a clear by handing the engine a state already at the threshold-1
-    # via a high-scoring play. Use a constructed hand of four-of-a-kind Kings.
+def test_clearing_a_blind_enters_shop():
     import dataclasses
+    from balatro_rl.engine.state import Phase
     s = reset(seed=1)
     big_hand = (Card(13, 0), Card(13, 1), Card(13, 2), Card(13, 3), Card(2, 0),
                 Card(3, 0), Card(4, 0), Card(5, 0))
-    s = dataclasses.replace(s, hand=big_hand, required=10)  # trivially clearable
+    s = dataclasses.replace(s, hand=big_hand, required=10)
     s2, info = step(s, (Verb.PLAY, (0, 1, 2, 3)))
     assert info.get("cleared") is True
-    assert s2.blind_index == 1            # advanced small -> big
-    assert s2.round_score == 0            # reset for the new blind
-    assert s2.hands_left == 4 and s2.discards_left == 3
-    assert len(s2.hand) == 8
+    assert s2.phase == Phase.SHOP        # now enters the shop instead of advancing
+    assert s2.blind_index == 0           # advance is deferred to LEAVE_SHOP
 
 
 def test_losing_when_hands_exhausted_without_clearing():
