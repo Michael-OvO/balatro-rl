@@ -3,6 +3,7 @@ and report how WELL it plays (ante reached, win-rate, run chips). Deterministic.
 """
 from __future__ import annotations
 
+import jax
 import jax.numpy as jnp
 import numpy as np
 
@@ -16,13 +17,14 @@ def _batch(obs: dict):
 
 
 def evaluate(net, params, seeds, reward_name: str = "shaped") -> dict:
+    apply = jax.jit(net.apply)   # compile the forward once; reused across all steps/seeds
     antes, wins, chips, lengths = [], [], [], []
     for seed in seeds:
         env = BalatroEnv(reward_name)
         obs, mask = env.reset(int(seed))
         run_chips, steps, done = 0, 0, False
         while not done and steps < _MAX_STEPS:
-            logits, _ = net.apply(params, _batch(obs), jnp.asarray(mask)[None])
+            logits, _ = apply(params, _batch(obs), jnp.asarray(mask)[None])
             a = int(jnp.argmax(logits[0]))
             obs, _reward, done, info, mask = env.step(a)
             if info.get("verb") == "play":
