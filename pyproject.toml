@@ -3,7 +3,7 @@ name = "balatro-rl"
 version = "0.0.1"
 description = "Reinforcement learning agent for Balatro"
 requires-python = ">=3.11"
-dependencies = ["numpy>=1.26"]
+dependencies = ["numpy>=1.26", "jax>=0.4.30", "flax>=0.8.0", "optax>=0.2.0"]
 
 [project.optional-dependencies]
 dev = ["pytest>=8.0"]
