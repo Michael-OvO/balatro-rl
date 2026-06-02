@@ -50,17 +50,17 @@ def _draw(hand: list, deck: list, hand_size: int) -> tuple[list, list]:
     return hand + drawn, deck[need:]
 
 
-def reset(seed: int) -> GameState:
+def reset(seed: int, scale: float = 1.0) -> GameState:
     rng = RNG.from_seed(seed)
     deck, rng = rng.shuffle(standard_deck())
     hand, deck = _draw([], deck, HAND_SIZE)
     return GameState(
         deck=tuple(deck), hand=tuple(hand), ante=1, blind_index=0,
-        round_score=0, required=required_score(1, 0),
+        round_score=0, required=required_score(1, 0, scale),
         hands_left=HANDS_PER_BLIND, discards_left=DISCARDS_PER_BLIND,
         hand_size=HAND_SIZE, levels=tuple([1] * 12), money=STARTING_MONEY,
         rng=rng, phase=Phase.PLAYING, done=False, won=False, jokers=(),
-        shop_offers=(), rerolls_done=0,
+        shop_offers=(), rerolls_done=0, req_scale=scale,
     )
 
 
@@ -104,7 +104,7 @@ def _advance_blind(state: GameState):
     hand, deck = _draw([], deck, state.hand_size)
     nxt = dataclasses.replace(
         state, ante=new_ante, blind_index=new_blind, deck=tuple(deck), hand=tuple(hand),
-        round_score=0, required=required_score(new_ante, new_blind),
+        round_score=0, required=required_score(new_ante, new_blind, state.req_scale),
         hands_left=HANDS_PER_BLIND, discards_left=DISCARDS_PER_BLIND, rng=rng,
         phase=Phase.PLAYING, shop_offers=(), rerolls_done=0, shop_steps=0)
     return nxt, {"verb": "leave_shop", "result": "next_blind",
