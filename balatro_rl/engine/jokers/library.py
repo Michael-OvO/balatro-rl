@@ -74,3 +74,8 @@ class _RideTheBus(JokerEffect):  # wiki: /w/Ride_the_Bus
         scored_face = any(is_face(played[i], rules) for i in scoring_idx)
         new_counter = 0.0 if scored_face else js.counter + 1.0
         return dataclasses.replace(js, counter=new_counter)
+
+
+@register(JokerType.BLUEPRINT)
+class _Blueprint(JokerEffect):  # wiki: /w/Blueprint  — copy resolution handled in base.resolve_providers
+    pass
