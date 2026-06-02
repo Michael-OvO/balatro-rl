@@ -15,6 +15,8 @@ from enum import IntEnum
 
 from .blinds import required_score
 from .cards import standard_deck
+from .hands import evaluate
+from .jokers.base import REGISTRY, aggregate_rules
 from .rng import RNG
 from .scoring import score_play
 from .state import GameState, Phase
@@ -47,7 +49,7 @@ def reset(seed: int) -> GameState:
         round_score=0, required=required_score(1, 0),
         hands_left=HANDS_PER_BLIND, discards_left=DISCARDS_PER_BLIND,
         hand_size=HAND_SIZE, levels=tuple([1] * 12), money=STARTING_MONEY,
-        rng=rng, phase=Phase.PLAYING, done=False, won=False,
+        rng=rng, phase=Phase.PLAYING, done=False, won=False, jokers=(),
     )
 
 
@@ -105,7 +107,18 @@ def step(state: GameState, action: tuple[Verb, tuple[int, ...]]) -> tuple[GameSt
 
     # PLAY
     assert state.hands_left > 0, "no hands left"
-    res = score_play(selected)
+    held = remaining  # cards still in hand (not played) score in the held phase
+    res = score_play(selected, jokers=state.jokers, held=tuple(held))
+    # Lifecycle: let scaling jokers (e.g. Ride the Bus) update from this hand.
+    rules = aggregate_rules(state.jokers) if state.jokers else None
+    if state.jokers:
+        _, scoring_idx = evaluate(list(selected), rules)
+        new_jokers = tuple(
+            REGISTRY[js.type].on_play(state, list(selected), list(scoring_idx), rules, js)
+            for js in state.jokers
+        )
+    else:
+        new_jokers = state.jokers
     round_score = state.round_score + res.score
     hands_left = state.hands_left - 1
     info = {"verb": "play", "score": res.score, "hand_type": int(res.hand_type),
@@ -114,14 +127,17 @@ def step(state: GameState, action: tuple[Verb, tuple[int, ...]]) -> tuple[GameSt
     if round_score >= state.required:
         # Blind cleared: _advance_blind reshuffles a fresh deck and redraws,
         # so we deliberately skip the redraw here.
-        return _advance_blind(state, round_score, info)
+        carried = dataclasses.replace(state, jokers=new_jokers)
+        return _advance_blind(carried, round_score, info)
 
     hand, deck = _draw(remaining, list(state.deck), state.hand_size)
     if hands_left <= 0:
         lost = dataclasses.replace(state, hand=tuple(hand), deck=tuple(deck),
                                    round_score=round_score, hands_left=0,
-                                   done=True, won=False, phase=Phase.LOST)
+                                   done=True, won=False, phase=Phase.LOST,
+                                   jokers=new_jokers)
         return lost, {**info, "result": "lost"}
     nxt = dataclasses.replace(state, hand=tuple(hand), deck=tuple(deck),
-                              round_score=round_score, hands_left=hands_left)
+                              round_score=round_score, hands_left=hands_left,
+                              jokers=new_jokers)
     return nxt, info
