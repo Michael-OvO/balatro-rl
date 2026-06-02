@@ -5,6 +5,7 @@ dtypes / pytree keys keep both jit-stable (no per-step recompiles).
 from __future__ import annotations
 
 import dataclasses
+import typing
 
 import jax
 import jax.numpy as jnp
@@ -35,7 +36,7 @@ class TrainConfig:
     gae_lambda: float = 0.95
     clip: float = 0.2
     vf_coef: float = 0.5
-    ent_coef: float = 0.01
+    ent_coef: typing.Union[float, typing.Callable[[int], float]] = 0.01
     reward_name: str = "shaped"
     seed: int = 0
     eval_interval: int = 0          # run greedy eval every N updates (0 = off)
@@ -52,6 +53,13 @@ class TrainResult:
 
 def _to_jax(obs: dict) -> dict:
     return {k: jnp.asarray(v) for k, v in obs.items()}
+
+
+def _ent_coef_at(ent_coef, update_idx: int) -> float:
+    """Entropy coefficient for this update: a fixed float, or a schedule
+    callable(update_idx)->float evaluated on the host. The value is passed into the
+    jitted `update` as a 0-d traced scalar, so changing it never recompiles."""
+    return float(ent_coef(update_idx)) if callable(ent_coef) else float(ent_coef)
 
 
 def train(cfg: TrainConfig, logger=None) -> TrainResult:
@@ -74,7 +82,7 @@ def train(cfg: TrainConfig, logger=None) -> TrainResult:
         return action, lp, value, key
 
     @jax.jit
-    def update(ts, batch, last_value, key):
+    def update(ts, batch, last_value, key, ent_coef):
         adv, targets = gae(batch["rewards"], batch["values"], batch["dones"],
                             last_value, cfg.gamma, cfg.gae_lambda)
         B = cfg.num_steps * cfg.num_envs
@@ -101,7 +109,7 @@ def train(cfg: TrainConfig, logger=None) -> TrainResult:
                            if kk == "obs" else sl(vv, i * mb_size, mb_size))
                       for kk, vv in shuf.items()}
                 (loss, aux), grads = jax.value_and_grad(ppo_loss, has_aux=True)(
-                    ts.params, net.apply, mb, cfg.clip, cfg.vf_coef, cfg.ent_coef)
+                    ts.params, net.apply, mb, cfg.clip, cfg.vf_coef, ent_coef)
                 return ts.apply_gradients(grads=grads), (loss,) + aux
 
             ts, losses = jax.lax.scan(minibatch, ts, jnp.arange(cfg.num_minibatches))
@@ -123,6 +131,7 @@ def train(cfg: TrainConfig, logger=None) -> TrainResult:
     eval_history = []
 
     for _ in range(cfg.num_updates):
+        ec = _ent_coef_at(cfg.ent_coef, len(losses))   # 0-based index of THIS update
         buf = {
             "obs": {k: np.zeros((T, N) + v.shape[1:], v.dtype) for k, v in next_obs.items()},
             "masks": np.zeros((T, N, NUM_ACTIONS), bool),
@@ -155,13 +164,14 @@ def train(cfg: TrainConfig, logger=None) -> TrainResult:
             "rewards": jnp.asarray(buf["rewards"]),
             "dones": jnp.asarray(buf["dones"]),
         }
-        ts, last, key = update(ts, batch, jnp.asarray(last_value), key)
+        ts, last, key = update(ts, batch, jnp.asarray(last_value), key, jnp.float32(ec))
         total, pg, vl, ent = (float(last[0]), float(last[1]), float(last[2]), float(last[3]))
         losses.append((total, pg, vl, ent))
         mean_returns.append(float(buf["rewards"].mean()))
         update_idx = len(losses) - 1
         logger.log({"loss/total": total, "loss/policy": pg, "loss/value": vl,
-                    "loss/entropy": ent, "train/mean_reward": mean_returns[-1]}, step=update_idx)
+                    "loss/entropy": ent, "train/mean_reward": mean_returns[-1],
+                    "train/ent_coef": ec}, step=update_idx)
         if cfg.eval_interval and (update_idx % cfg.eval_interval == 0):
             metrics = evaluate(net, ts.params, cfg.eval_seeds, cfg.reward_name)
             eval_history.append(metrics)
