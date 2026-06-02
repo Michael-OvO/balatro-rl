@@ -14,6 +14,8 @@ from flax.training.train_state import TrainState
 
 from ..envs.actions import NUM_ACTIONS
 from ..envs.vec_env import SyncVectorEnv
+from .eval import evaluate
+from .metrics_logger import NullLogger
 from .networks import ActorCritic
 from .ppo import gae, log_prob, ppo_loss, sample_action
 from .spec import dummy_obs
@@ -36,6 +38,8 @@ class TrainConfig:
     ent_coef: float = 0.01
     reward_name: str = "shaped"
     seed: int = 0
+    eval_interval: int = 0          # run greedy eval every N updates (0 = off)
+    eval_seeds: tuple = (0, 1, 2, 3)
 
 
 @dataclasses.dataclass
@@ -43,13 +47,16 @@ class TrainResult:
     params: object
     losses: list           # [(total, pg, vl, ent), ...] one per update
     mean_returns: list      # mean per-step reward each update (finite scalar)
+    eval_history: list = dataclasses.field(default_factory=list)   # one eval-metrics dict per eval
 
 
 def _to_jax(obs: dict) -> dict:
     return {k: jnp.asarray(v) for k, v in obs.items()}
 
 
-def train(cfg: TrainConfig) -> TrainResult:
+def train(cfg: TrainConfig, logger=None) -> TrainResult:
+    if logger is None:
+        logger = NullLogger()
     key = jax.random.PRNGKey(cfg.seed)
     net = ActorCritic(action_dim=NUM_ACTIONS, d_model=cfg.d_model)
     key, init_key = jax.random.split(key)
@@ -113,6 +120,7 @@ def train(cfg: TrainConfig) -> TrainResult:
         f"num_minibatches {cfg.num_minibatches}; otherwise minibatching silently drops rows"
     )
     losses, mean_returns = [], []
+    eval_history = []
 
     for _ in range(cfg.num_updates):
         buf = {
@@ -151,8 +159,17 @@ def train(cfg: TrainConfig) -> TrainResult:
         total, pg, vl, ent = (float(last[0]), float(last[1]), float(last[2]), float(last[3]))
         losses.append((total, pg, vl, ent))
         mean_returns.append(float(buf["rewards"].mean()))
+        update_idx = len(losses) - 1
+        logger.log({"loss/total": total, "loss/policy": pg, "loss/value": vl,
+                    "loss/entropy": ent, "train/mean_reward": mean_returns[-1]}, step=update_idx)
+        if cfg.eval_interval and (update_idx % cfg.eval_interval == 0):
+            metrics = evaluate(net, ts.params, cfg.eval_seeds, cfg.reward_name)
+            eval_history.append(metrics)
+            logger.log(metrics, step=update_idx)
 
-    return TrainResult(params=ts.params, losses=losses, mean_returns=mean_returns)
+    logger.finish()
+    return TrainResult(params=ts.params, losses=losses, mean_returns=mean_returns,
+                       eval_history=eval_history)
 
 
 if __name__ == "__main__":
