@@ -1,21 +1,30 @@
+import pytest
+
 from balatro_rl.engine.jokers.base import (
     JokerEffect, JokerType, JokerState, Effect, RuleFlags,
     register, REGISTRY, aggregate_rules, resolve_providers, ScoreContext,
 )
 
 
-# Minimal stubs so the registry/resolve tests are self-contained when this file
-# runs alone (the Plan-2 joker library is not imported here). The conftest
-# fixture restores REGISTRY between tests, so these module-level stubs persist.
-@register(JokerType.JOKER)
+# Minimal stubs so the registry/resolve tests are self-contained (the Plan-2
+# joker library is not imported here). Registered per-test via an autouse
+# fixture (NOT at module/collection time) so they don't contaminate the
+# REGISTRY snapshot baseline of other test modules; the conftest fixture then
+# restores REGISTRY after each test.
 class _StubJoker(JokerEffect):
     def independent(self, ctx, js):
         return Effect(mult=4)
 
 
-@register(JokerType.BLUEPRINT)
 class _StubBlueprint(JokerEffect):
     pass
+
+
+@pytest.fixture(autouse=True)
+def _register_stubs():
+    REGISTRY[JokerType.JOKER] = _StubJoker()
+    REGISTRY[JokerType.BLUEPRINT] = _StubBlueprint()
+    yield
 
 
 def test_default_hooks_are_noops():

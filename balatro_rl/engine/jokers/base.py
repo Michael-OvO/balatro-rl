@@ -20,6 +20,15 @@ class JokerType(IntEnum):
     SPLASH = 52
     PAREIDOLIA = 37
     BLUEPRINT = 123
+    GOLDEN_JOKER = 90
+    EGG = 46
+
+
+class Rarity(IntEnum):
+    COMMON = 0
+    UNCOMMON = 1
+    RARE = 2
+    LEGENDARY = 3
 
 
 @dataclasses.dataclass(frozen=True, slots=True)
@@ -52,6 +61,7 @@ class JokerState:
     type: JokerType
     edition: int = 0      # 0 = base (editions are a later plan)
     counter: float = 0.0
+    sell_bonus: int = 0   # extra sell value beyond floor(cost/2), e.g. from Egg
 
 
 @dataclasses.dataclass(slots=True)
@@ -74,6 +84,8 @@ class JokerEffect:
     scoring hooks (passive/rule/economy jokers set it False — see wiki).
     """
     copyable: bool = True
+    rarity: "Rarity" = None      # set by each joker; Rarity enum
+    cost: int = 4                # base shop buy price ($); set by each joker
 
     def independent(self, ctx, js: "JokerState") -> Effect:
         return NO_EFFECT
@@ -93,6 +105,12 @@ class JokerEffect:
     def on_play(self, state, played, scoring_idx, rules, js: "JokerState") -> "JokerState":
         """Lifecycle after a hand is played; return updated JokerState (scaling)."""
         return js
+
+    def on_round_end(self, state, js: "JokerState", rng):
+        """End-of-round (cash-out) lifecycle. Returns
+        (updated JokerState, money_delta:int, destroy:bool, rng).
+        rng is threaded for probabilistic effects (e.g. self-destroy)."""
+        return js, 0, False, rng
 
 
 REGISTRY: dict[JokerType, JokerEffect] = {}
