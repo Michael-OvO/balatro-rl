@@ -37,7 +37,7 @@ def test_flush_all_cards_score():
 
 def test_four_of_a_kind_excludes_kicker_chips():
     # base (60,7); four 9s score (9*4=36), kicker King does NOT add chips
-    res = score_play([C(9), C(9), C(9), C(9), C(13)])
+    res = score_play([C(9), C(9), C(9), C(9), C(13, 2)])
     assert res.hand_type == HandType.FOUR_OF_A_KIND
     assert res.chips == 60 + 36
     assert res.score == (60 + 36) * 7

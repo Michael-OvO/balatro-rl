@@ -15,6 +15,7 @@ from enum import IntEnum
 
 from .blinds import required_score
 from .cards import standard_deck
+from .rng import RNG
 from .scoring import score_play
 from .state import GameState, Phase
 
@@ -38,7 +39,6 @@ def _draw(hand: list, deck: list, hand_size: int) -> tuple[list, list]:
 
 
 def reset(seed: int) -> GameState:
-    from .rng import RNG
     rng = RNG.from_seed(seed)
     deck, rng = rng.shuffle(standard_deck())
     hand, deck = _draw([], deck, HAND_SIZE)
@@ -65,7 +65,7 @@ def legal_actions(state: GameState) -> list[tuple[Verb, tuple[int, ...]]]:
     return actions
 
 
-def _advance_blind(state: GameState, round_score: int, info: dict):
+def _advance_blind(state: GameState, round_score: int, info: dict) -> tuple[GameState, dict]:
     if state.blind_index < 2:
         new_ante, new_blind = state.ante, state.blind_index + 1
     else:
@@ -85,7 +85,7 @@ def _advance_blind(state: GameState, round_score: int, info: dict):
     return nxt, {**info, "cleared": True, "result": "blind_cleared"}
 
 
-def step(state: GameState, action: tuple[Verb, tuple[int, ...]]):
+def step(state: GameState, action: tuple[Verb, tuple[int, ...]]) -> tuple[GameState, dict]:
     assert not state.done, "step() called on a terminal state"
     verb, idx = action
     assert 1 <= len(idx) <= MAX_SELECT, "must select 1..5 cards"
@@ -110,19 +110,18 @@ def step(state: GameState, action: tuple[Verb, tuple[int, ...]]):
     hands_left = state.hands_left - 1
     info = {"verb": "play", "score": res.score, "hand_type": int(res.hand_type),
             "chips": res.chips, "mult": res.mult}
-    hand, deck = _draw(remaining, list(state.deck), state.hand_size)
 
     if round_score >= state.required:
-        cleared_state = dataclasses.replace(state, hand=tuple(hand), deck=tuple(deck),
-                                            hands_left=hands_left)
-        return _advance_blind(cleared_state, round_score, info)
+        # Blind cleared: _advance_blind reshuffles a fresh deck and redraws,
+        # so we deliberately skip the redraw here.
+        return _advance_blind(state, round_score, info)
 
+    hand, deck = _draw(remaining, list(state.deck), state.hand_size)
     if hands_left <= 0:
         lost = dataclasses.replace(state, hand=tuple(hand), deck=tuple(deck),
                                    round_score=round_score, hands_left=0,
                                    done=True, won=False, phase=Phase.LOST)
         return lost, {**info, "result": "lost"}
-
     nxt = dataclasses.replace(state, hand=tuple(hand), deck=tuple(deck),
                               round_score=round_score, hands_left=hands_left)
     return nxt, info

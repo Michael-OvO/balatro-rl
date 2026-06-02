@@ -66,7 +66,7 @@ def evaluate(cards: list[Card]) -> tuple[HandType, list[int]]:
     counts = sorted(rank_counts.values(), reverse=True)
     is_flush = n == 5 and len(set(suits)) == 1
     is_straight = n == 5 and _is_straight(ranks)
-    all_idx = list(range(n))
+    all_idx = tuple(range(n))
 
     def idx_with_count(k: int) -> list[int]:
         targets = {r for r, c in rank_counts.items() if c == k}
@@ -81,7 +81,7 @@ def evaluate(cards: list[Card]) -> tuple[HandType, list[int]]:
     if is_flush and is_straight:
         return HandType.STRAIGHT_FLUSH, all_idx
     if counts and counts[0] == 4:
-        return HandType.FOUR_OF_A_KIND, idx_with_count(4)
+        return HandType.FOUR_OF_A_KIND, tuple(idx_with_count(4))
     if counts == [3, 2]:
         return HandType.FULL_HOUSE, all_idx
     if is_flush:
@@ -89,10 +89,10 @@ def evaluate(cards: list[Card]) -> tuple[HandType, list[int]]:
     if is_straight:
         return HandType.STRAIGHT, all_idx
     if counts and counts[0] == 3:
-        return HandType.THREE_OF_A_KIND, idx_with_count(3)
+        return HandType.THREE_OF_A_KIND, tuple(idx_with_count(3))
     if counts[:2] == [2, 2]:
-        return HandType.TWO_PAIR, idx_with_count(2)
+        return HandType.TWO_PAIR, tuple(idx_with_count(2))
     if counts and counts[0] == 2:
-        return HandType.PAIR, idx_with_count(2)
+        return HandType.PAIR, tuple(idx_with_count(2))
     hi = max(range(n), key=lambda i: ranks[i])
-    return HandType.HIGH_CARD, [hi]
+    return HandType.HIGH_CARD, (hi,)

@@ -77,3 +77,11 @@ def test_winning_after_clearing_ante8_boss():
     s2, info = step(s, (Verb.PLAY, (0,)))
     assert s2.done and s2.won
     assert s2.phase == Phase.WON
+
+
+def test_step_is_pure():
+    s = reset(seed=42)
+    s2a, info_a = step(s, (Verb.PLAY, (0,)))
+    s2b, info_b = step(s, (Verb.PLAY, (0,)))
+    assert s2a == s2b
+    assert info_a == info_b

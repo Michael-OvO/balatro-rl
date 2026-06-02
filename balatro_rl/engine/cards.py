@@ -8,7 +8,6 @@ from __future__ import annotations
 import dataclasses
 
 RANK_MIN, RANK_MAX = 2, 14  # J=11, Q=12, K=13, A=14
-SUIT_NAMES = {0: "Spades", 1: "Hearts", 2: "Clubs", 3: "Diamonds"}
 _RANK_NAMES = {11: "J", 12: "Q", 13: "K", 14: "A"}
 _SUIT_GLYPH = {0: "♠", 1: "♥", 2: "♣", 3: "♦"}  # ♠♥♣♦
 

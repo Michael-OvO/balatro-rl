@@ -18,7 +18,7 @@ class ScoreResult:
     hand_type: HandType
     chips: int
     mult: int
-    scoring_idx: list[int]
+    scoring_idx: tuple[int, ...]
 
 
 def score_play(cards: list[Card]) -> ScoreResult:

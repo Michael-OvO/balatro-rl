@@ -10,7 +10,7 @@ def C(rank, suit=None):
 def test_high_card_scores_only_highest():
     ht, idx = evaluate([C(14), C(7), C(3)])
     assert ht == HandType.HIGH_CARD
-    assert idx == [0]  # the Ace
+    assert idx == (0,)  # the Ace
 
 
 def test_pair_scores_only_the_pair():
@@ -33,7 +33,7 @@ def test_three_of_a_kind_scores_only_the_three():
 
 
 def test_four_of_a_kind_excludes_kicker():
-    ht, idx = evaluate([C(9), C(9), C(9), C(9), C(5)])
+    ht, idx = evaluate([C(9), C(9), C(9), C(9), C(13, 2)])
     assert ht == HandType.FOUR_OF_A_KIND
     assert sorted(idx) == [0, 1, 2, 3]  # kicker (index 4) does NOT score
 
