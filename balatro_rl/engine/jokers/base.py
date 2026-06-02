@@ -114,7 +114,11 @@ def aggregate_rules(jokers: tuple) -> RuleFlags:
 
 def _blueprint_target(jokers: tuple, i: int) -> int | None:
     """Index of the joker Blueprint at slot i ultimately copies (walks right past
-    chained Blueprints; None if it runs off the end)."""
+    chained Blueprints; None if it runs off the end).
+
+    The `seen` set is defensive scaffolding for future non-linear copy jokers
+    (e.g. Brainstorm copies the leftmost joker); for Blueprint alone, indices
+    strictly increase so a cycle is impossible."""
     j = i + 1
     seen = set()
     while j < len(jokers) and jokers[j].type == JokerType.BLUEPRINT:

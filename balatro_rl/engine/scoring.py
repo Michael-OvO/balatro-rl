@@ -28,6 +28,9 @@ class ScoreResult:
 
 
 def _apply(ctx: ScoreContext, eff) -> None:
+    # Within one Effect, additive applies before multiplicative (+chips/+mult, then xmult).
+    # Dual-stat ("++") jokers needing a different interleaving should emit separate Effects
+    # across hooks rather than combining +mult and xmult in a single Effect.
     ctx.chips += eff.chips
     ctx.mult += eff.mult
     ctx.mult *= eff.xmult
@@ -63,5 +66,8 @@ def score_play(played, jokers: tuple = (), held: tuple = ()) -> ScoreResult:
     for eff, js in providers:
         _apply(ctx, eff.independent(ctx, js))
 
+    # int(floor) matches the game. NOTE: in deep Endless, mult is a float and products
+    # above 2**53 lose integer precision (scores may differ from the game by >=1 at extreme
+    # antes). Revisit with exact/bignum scoring when Endless is implemented.
     return ScoreResult(score=int(ctx.chips * ctx.mult), hand_type=hand_type,
                        chips=ctx.chips, mult=ctx.mult, scoring_idx=tuple(scoring_idx))

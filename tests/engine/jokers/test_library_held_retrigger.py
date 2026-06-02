@@ -44,3 +44,21 @@ def test_hack_retrigger_refires_greedy():
     res = score_play([C(3, 3), C(3, 3), C(7, 0), C(9, 0), C(2, 0)],
                      jokers=(J(JokerType.HACK), J(JokerType.GREEDY)))
     assert res.chips == 22 and res.mult == 14.0 and res.score == 22 * 14
+
+
+def test_photograph_reapplies_on_retrigger():
+    # Pareidolia (all face) + Hack (retrigger 2-5) + Photograph, pair of 4s.
+    # First-face card (idx 0) is a 4 -> Hack retriggers it -> fires twice -> Photograph x2 each -> x4.
+    # chips: base 10 + 4*2 (card0 twice) + 4*2 (card1 twice) = 26.
+    # mult:  base 2, x2 on each of card0's two triggers -> 2*2*2 = 8.
+    res = score_play([C(4, 0), C(4, 1), C(7, 2), C(9, 3), C(2, 0)],
+                     jokers=(J(JokerType.PAREIDOLIA), J(JokerType.HACK), J(JokerType.PHOTOGRAPH)))
+    assert res.chips == 26 and res.mult == 8.0
+
+
+def test_held_xmult_applies_before_independent_addmult():
+    # Baron (held King x1.5) resolves in the held phase, BEFORE Joker's independent +4.
+    # Pair of 3s: 16 chips, base mult 2.  x1.5 -> 3, then +4 -> 7   (NOT (2+4)*1.5 = 9).
+    res = score_play([C(3, 0), C(3, 1), C(7, 2), C(9, 3), C(2, 0)],
+                     jokers=(J(JokerType.BARON), J(JokerType.JOKER)), held=(C(13),))
+    assert res.mult == 7.0 and res.score == 112
