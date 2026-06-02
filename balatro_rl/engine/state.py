@@ -35,3 +35,4 @@ class GameState:
     phase: Phase
     done: bool
     won: bool
+    jokers: tuple = ()   # tuple[JokerState, ...]; empty until acquired (shop is a later plan)
