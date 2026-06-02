@@ -38,6 +38,7 @@ class ConsoleLogger:
     """
 
     _EVAL_LAYOUT = (
+        ("eval/mean_blinds_cleared", "blinds", "{:.2f}"),
         ("eval/mean_ante", "ante", "{:.2f}"),
         ("eval/max_ante", "max", "{:.0f}"),
         ("eval/win_rate", "win", "{:.3f}"),

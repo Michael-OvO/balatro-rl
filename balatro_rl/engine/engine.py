@@ -30,6 +30,7 @@ DISCARDS_PER_BLIND = 3
 HAND_SIZE = 8
 MAX_SELECT = 5
 JOKER_SLOTS = 5
+SHOP_ACTION_CAP = 12          # max actions per shop visit; then only LEAVE_SHOP is legal
 
 
 class Verb(IntEnum):
@@ -67,6 +68,8 @@ def legal_actions(state: GameState) -> list[tuple[Verb, tuple[int, ...]]]:
     if state.done:
         return []
     if state.phase == Phase.SHOP:
+        if state.shop_steps >= SHOP_ACTION_CAP:
+            return [(Verb.LEAVE_SHOP, 0)]          # bound shop dithering -> force progress
         actions = [(Verb.LEAVE_SHOP, 0)]
         for i, offer in enumerate(state.shop_offers):
             if state.money >= joker_cost(offer.type) and len(state.jokers) < JOKER_SLOTS:
@@ -103,7 +106,7 @@ def _advance_blind(state: GameState):
         state, ante=new_ante, blind_index=new_blind, deck=tuple(deck), hand=tuple(hand),
         round_score=0, required=required_score(new_ante, new_blind),
         hands_left=HANDS_PER_BLIND, discards_left=DISCARDS_PER_BLIND, rng=rng,
-        phase=Phase.PLAYING, shop_offers=(), rerolls_done=0)
+        phase=Phase.PLAYING, shop_offers=(), rerolls_done=0, shop_steps=0)
     return nxt, {"verb": "leave_shop", "result": "next_blind",
                  "ante": new_ante, "blind": new_blind}
 
@@ -132,7 +135,8 @@ def _enter_cashout_or_win(state: GameState, info: dict):
     money, jokers, rng = _cash_out(state)
     offers, rng = generate_offers(rng, CARD_SLOTS)
     shop = dataclasses.replace(state, money=money, jokers=jokers, rng=rng,
-                               phase=Phase.SHOP, shop_offers=offers, rerolls_done=0)
+                               phase=Phase.SHOP, shop_offers=offers, rerolls_done=0,
+                               shop_steps=0)
     return shop, {**info, "cleared": True, "result": "shop", "earned": money - state.money}
 
 
@@ -208,7 +212,8 @@ def _shop_step(state: GameState, action):
         assert len(state.jokers) < JOKER_SLOTS, "no joker slot"
         offers = tuple(o for k, o in enumerate(state.shop_offers) if k != i)
         nxt = dataclasses.replace(state, money=state.money - cost,
-                                  jokers=state.jokers + (offer,), shop_offers=offers)
+                                  jokers=state.jokers + (offer,), shop_offers=offers,
+                                  shop_steps=state.shop_steps + 1)
         return nxt, {"verb": "buy", "joker": int(offer.type), "cost": cost}
     if verb == Verb.SELL:
         i = action[1]
@@ -216,14 +221,16 @@ def _shop_step(state: GameState, action):
         js = state.jokers[i]
         value = sell_value(js.type, js.sell_bonus)
         jokers = tuple(j for k, j in enumerate(state.jokers) if k != i)
-        nxt = dataclasses.replace(state, money=state.money + value, jokers=jokers)
+        nxt = dataclasses.replace(state, money=state.money + value, jokers=jokers,
+                                  shop_steps=state.shop_steps + 1)
         return nxt, {"verb": "sell", "value": value}
     if verb == Verb.REROLL:
         cost = reroll_cost(state.rerolls_done)
         assert state.money >= cost, "cannot afford reroll"
         offers, rng = generate_offers(state.rng, CARD_SLOTS)
         nxt = dataclasses.replace(state, money=state.money - cost, shop_offers=offers,
-                                  rerolls_done=state.rerolls_done + 1, rng=rng)
+                                  rerolls_done=state.rerolls_done + 1, rng=rng,
+                                  shop_steps=state.shop_steps + 1)
         return nxt, {"verb": "reroll", "cost": cost}
     if verb == Verb.REORDER:
         i, j = action[1]
@@ -231,5 +238,6 @@ def _shop_step(state: GameState, action):
         jk = list(state.jokers)
         item = jk.pop(i)
         jk.insert(j, item)
-        return dataclasses.replace(state, jokers=tuple(jk)), {"verb": "reorder"}
+        return dataclasses.replace(state, jokers=tuple(jk),
+                                   shop_steps=state.shop_steps + 1), {"verb": "reorder"}
     raise ValueError(f"illegal shop action: {verb}")

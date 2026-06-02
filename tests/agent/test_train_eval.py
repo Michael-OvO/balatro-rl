@@ -32,6 +32,15 @@ def test_train_default_logger_is_null():
     assert result.eval_history == []
 
 
+def test_eval_reports_loop_robust_blinds_metric():
+    result = train(_cfg(), logger=NullLogger())
+    m = result.eval_history[-1]
+    for k in ("eval/mean_blinds_cleared", "eval/max_blinds_cleared", "eval/blind1_clear_rate"):
+        assert k in m and np.isfinite(m[k])
+    assert m["eval/max_blinds_cleared"] >= m["eval/mean_blinds_cleared"]
+    assert 0.0 <= m["eval/blind1_clear_rate"] <= 1.0
+
+
 def test_ent_coef_fixed_float_logs_constant():
     logger = NullLogger()
     train(_cfg(ent_coef=0.02, eval_interval=0), logger=logger)
