@@ -55,7 +55,7 @@ def _is_straight(ranks: list[int]) -> bool:
     return u == [2, 3, 4, 5, 14]  # Ace-low: A-2-3-4-5
 
 
-def evaluate(cards: list[Card]) -> tuple[HandType, list[int]]:
+def evaluate(cards: list[Card]) -> tuple[HandType, tuple[int, ...]]:
     """Best (HandType, scoring-card indices) for 1..5 played cards."""
     n = len(cards)
     if n == 0:
