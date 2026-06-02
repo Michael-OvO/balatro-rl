@@ -104,6 +104,12 @@ class JokerEffect:
         """Lifecycle after a hand is played; return updated JokerState (scaling)."""
         return js
 
+    def on_round_end(self, state, js: "JokerState", rng):
+        """End-of-round (cash-out) lifecycle. Returns
+        (updated JokerState, money_delta:int, destroy:bool, rng).
+        rng is threaded for probabilistic effects (e.g. self-destroy)."""
+        return js, 0, False, rng
+
 
 REGISTRY: dict[JokerType, JokerEffect] = {}
 
