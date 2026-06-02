@@ -1,0 +1,19 @@
+[project]
+name = "balatro-rl"
+version = "0.0.1"
+description = "Reinforcement learning agent for Balatro"
+requires-python = ">=3.11"
+dependencies = []
+
+[project.optional-dependencies]
+dev = ["pytest>=8.0"]
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+packages = ["balatro_rl"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
