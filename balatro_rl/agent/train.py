@@ -108,6 +108,10 @@ def train(cfg: TrainConfig) -> TrainResult:
     venv = SyncVectorEnv(cfg.num_envs, cfg.reward_name, base_seed=cfg.seed + 1000)
     next_obs, next_mask = venv.reset()
     T, N = cfg.num_steps, cfg.num_envs
+    assert (T * N) % cfg.num_minibatches == 0, (
+        f"rollout batch {T * N} (num_steps*num_envs) must be divisible by "
+        f"num_minibatches {cfg.num_minibatches}; otherwise minibatching silently drops rows"
+    )
     losses, mean_returns = [], []
 
     for _ in range(cfg.num_updates):
