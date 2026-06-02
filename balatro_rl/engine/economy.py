@@ -1,0 +1,20 @@
+"""Run economy: blind rewards and interest. Verified values in
+docs/reference/economy-shop.md (balatrowiki.org). Stake/deck modifiers and
+voucher cap-raises are later plans (default cap = 5).
+"""
+from __future__ import annotations
+
+BLIND_REWARD: tuple[int, int, int] = (3, 4, 5)  # Small, Big, Boss
+INTEREST_PER = 5      # +$1 per $5 held
+INTEREST_CAP = 5      # default cap ($5, reached at $25)
+MONEY_PER_UNUSED_HAND = 1  # standard decks
+
+
+def blind_reward(blind_index: int) -> int:
+    return BLIND_REWARD[blind_index]
+
+
+def interest(money: int, cap: int = INTEREST_CAP) -> int:
+    if money <= 0:
+        return 0
+    return min(money // INTEREST_PER, cap)
