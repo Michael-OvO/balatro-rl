@@ -15,13 +15,19 @@ def _stack(obs_list: list[dict]) -> dict:
 
 
 class SyncVectorEnv:
-    def __init__(self, num_envs: int, reward_name: str = "shaped", base_seed: int = 0):
+    def __init__(self, num_envs: int, reward_name: str = "shaped", base_seed: int = 0,
+                 req_scale: float = 1.0):
         self.num_envs = num_envs
         self.base_seed = base_seed
-        self._envs = [BalatroEnv(reward_name) for _ in range(num_envs)]
+        self._envs = [BalatroEnv(reward_name, req_scale) for _ in range(num_envs)]
         self._next_seed = base_seed
         self._obs = None
         self._mask = None
+
+    def set_req_scale(self, scale: float):
+        """Update the curriculum scale on EVERY sub-env; new (incl. auto-reset) episodes use it."""
+        for env in self._envs:
+            env.set_req_scale(scale)
 
     def _fresh_seed(self) -> int:
         s = self._next_seed
