@@ -50,6 +50,7 @@ def reset(seed: int) -> GameState:
         hands_left=HANDS_PER_BLIND, discards_left=DISCARDS_PER_BLIND,
         hand_size=HAND_SIZE, levels=tuple([1] * 12), money=STARTING_MONEY,
         rng=rng, phase=Phase.PLAYING, done=False, won=False, jokers=(),
+        shop_offers=(), rerolls_done=0,
     )
 
 

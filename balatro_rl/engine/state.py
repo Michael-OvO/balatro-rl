@@ -16,6 +16,7 @@ class Phase(IntEnum):
     PLAYING = 0
     WON = 1
     LOST = 2
+    SHOP = 3
 
 
 @dataclasses.dataclass(frozen=True, slots=True)
@@ -36,3 +37,5 @@ class GameState:
     done: bool
     won: bool
     jokers: tuple = ()   # tuple[JokerState, ...]; empty until acquired (shop is a later plan)
+    shop_offers: tuple = ()   # tuple[JokerState, ...] offered in the shop
+    rerolls_done: int = 0      # rerolls used in the current shop (for reroll cost)
