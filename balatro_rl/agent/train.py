@@ -4,8 +4,10 @@ dtypes / pytree keys keep both jit-stable (no per-step recompiles).
 """
 from __future__ import annotations
 
+import collections
 import dataclasses
 import typing
+import warnings
 
 import jax
 import jax.numpy as jnp
@@ -41,6 +43,14 @@ class TrainConfig:
     seed: int = 0
     eval_interval: int = 0          # run greedy eval every N updates (0 = off)
     eval_seeds: tuple = (0, 1, 2, 3)
+    # Curriculum: shrink the blind target so the agent experiences clearing, then ramp to 1.0.
+    # `curr_floor` < 1.0 enables the closed-loop ramp (start at curr_floor, raise on clear-rate);
+    # a callable `req_scale_schedule` overrides with an open-loop schedule. Default = real game.
+    req_scale_schedule: typing.Union[float, typing.Callable[[int], float]] = 1.0
+    curr_floor: float = 1.0
+    ramp_clear_rate: float = 0.7
+    ramp_step: float = 0.05
+    ramp_window: int = 20
 
 
 @dataclasses.dataclass
@@ -60,6 +70,15 @@ def _ent_coef_at(ent_coef, update_idx: int) -> float:
     callable(update_idx)->float evaluated on the host. The value is passed into the
     jitted `update` as a 0-d traced scalar, so changing it never recompiles."""
     return float(ent_coef(update_idx)) if callable(ent_coef) else float(ent_coef)
+
+
+def _ramp_scale(cur_scale: float, clear_rate: float, window_full: bool, cfg) -> float:
+    """Closed-loop curriculum: once the clear-rate window is full AND the agent clears
+    reliably (clear_rate > ramp_clear_rate), raise the blind target toward the real game
+    (1.0) by ramp_step; otherwise hold. Already at 1.0 stays at 1.0."""
+    if cur_scale < 1.0 and window_full and clear_rate > cfg.ramp_clear_rate:
+        return min(1.0, round(cur_scale + cfg.ramp_step, 4))
+    return cur_scale
 
 
 def train(cfg: TrainConfig, logger=None) -> TrainResult:
@@ -120,18 +139,32 @@ def train(cfg: TrainConfig, logger=None) -> TrainResult:
         last = jax.tree_util.tree_map(lambda x: x[-1].mean(), losses)
         return ts, last, key
 
-    venv = SyncVectorEnv(cfg.num_envs, cfg.reward_name, base_seed=cfg.seed + 1000)
+    # Curriculum: open-loop schedule (callable) overrides; else closed-loop ramp from
+    # curr_floor when curr_floor < 1.0; else the real game (scale 1.0).
+    _open_loop = callable(cfg.req_scale_schedule)
+    cur_scale = float(cfg.req_scale_schedule(0)) if _open_loop else float(cfg.curr_floor)
+    venv = SyncVectorEnv(cfg.num_envs, cfg.reward_name, base_seed=cfg.seed + 1000,
+                         req_scale=cur_scale)
     next_obs, next_mask = venv.reset()
     T, N = cfg.num_steps, cfg.num_envs
     assert (T * N) % cfg.num_minibatches == 0, (
         f"rollout batch {T * N} (num_steps*num_envs) must be divisible by "
         f"num_minibatches {cfg.num_minibatches}; otherwise minibatching silently drops rows"
     )
+    if (T * N) // cfg.num_minibatches > 4096:
+        warnings.warn(f"minibatch {(T * N) // cfg.num_minibatches} is large; the card-aware net's "
+                      "[mb,218,5,d] candidate gather may OOM — raise num_minibatches.", stacklevel=2)
     losses, mean_returns = [], []
     eval_history = []
+    clears_w = collections.deque(maxlen=cfg.ramp_window)
+    dones_w = collections.deque(maxlen=cfg.ramp_window)
 
     for _ in range(cfg.num_updates):
         ec = _ent_coef_at(cfg.ent_coef, len(losses))   # 0-based index of THIS update
+        if _open_loop:
+            cur_scale = float(cfg.req_scale_schedule(len(losses)))
+            venv.set_req_scale(cur_scale)
+        update_clears = update_dones = 0
         buf = {
             "obs": {k: np.zeros((T, N) + v.shape[1:], v.dtype) for k, v in next_obs.items()},
             "masks": np.zeros((T, N, NUM_ACTIONS), bool),
@@ -150,9 +183,11 @@ def train(cfg: TrainConfig, logger=None) -> TrainResult:
             buf["actions"][t] = a
             buf["logps"][t] = np.asarray(lp)
             buf["values"][t] = np.asarray(value)
-            next_obs, rewards, dones, _, next_mask = venv.step(a)
+            next_obs, rewards, dones, infos, next_mask = venv.step(a)
             buf["rewards"][t] = rewards
             buf["dones"][t] = dones.astype(np.float32)
+            update_clears += sum(1 for info in infos if info.get("cleared"))
+            update_dones += int(dones.sum())
 
         _, _, last_value, key = act(ts.params, _to_jax(next_obs), jnp.asarray(next_mask), key)
         batch = {
@@ -169,9 +204,20 @@ def train(cfg: TrainConfig, logger=None) -> TrainResult:
         losses.append((total, pg, vl, ent))
         mean_returns.append(float(buf["rewards"].mean()))
         update_idx = len(losses) - 1
+        clears_w.append(update_clears)
+        dones_w.append(update_dones)
+        clear_rate = sum(clears_w) / max(1, sum(dones_w))   # avg blinds cleared per episode
         logger.log({"loss/total": total, "loss/policy": pg, "loss/value": vl,
                     "loss/entropy": ent, "train/mean_reward": mean_returns[-1],
-                    "train/ent_coef": ec}, step=update_idx)
+                    "train/ent_coef": ec, "train/req_scale": cur_scale,
+                    "train/clear_rate": clear_rate}, step=update_idx)
+        if not _open_loop:
+            new_scale = _ramp_scale(cur_scale, clear_rate, len(clears_w) == cfg.ramp_window, cfg)
+            if new_scale != cur_scale:
+                cur_scale = new_scale
+                venv.set_req_scale(cur_scale)
+                clears_w.clear()
+                dones_w.clear()
         if cfg.eval_interval and (update_idx % cfg.eval_interval == 0):
             metrics = evaluate(net, ts.params, cfg.eval_seeds, cfg.reward_name)
             eval_history.append(metrics)
