@@ -37,3 +37,15 @@ class _ScaryFace(JokerEffect):  # wiki: /w/Scary_Face  — +30 Chips per scored 
 class _Photograph(JokerEffect):  # wiki: /w/Photograph  — X2 on first scoring face card (re-applies on retrigger)
     def on_score(self, ctx, card, index, js):
         return Effect(xmult=2.0) if index == ctx.first_face_idx else Effect()
+
+
+@register(JokerType.BARON)
+class _Baron(JokerEffect):  # wiki: /w/Baron  — each King held gives X1.5 Mult
+    def on_held(self, ctx, card, js):
+        return Effect(xmult=1.5) if card.rank == 13 else Effect()
+
+
+@register(JokerType.HACK)
+class _Hack(JokerEffect):  # wiki: /w/Hack  — retrigger each played 2,3,4,5
+    def retrigger(self, ctx, card, js):
+        return 1 if card.rank in (2, 3, 4, 5) else 0
