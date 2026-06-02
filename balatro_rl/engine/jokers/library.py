@@ -63,3 +63,14 @@ class _Pareidolia(JokerEffect):  # wiki: /w/Pareidolia  — all cards are face c
     copyable = False
     def rules(self):
         return RuleFlags(all_face=True)
+
+
+@register(JokerType.RIDE_THE_BUS)
+class _RideTheBus(JokerEffect):  # wiki: /w/Ride_the_Bus
+    def independent(self, ctx, js):
+        return Effect(mult=js.counter)
+
+    def on_play(self, state, played, scoring_idx, rules, js):
+        scored_face = any(is_face(played[i], rules) for i in scoring_idx)
+        new_counter = 0.0 if scored_face else js.counter + 1.0
+        return dataclasses.replace(js, counter=new_counter)
