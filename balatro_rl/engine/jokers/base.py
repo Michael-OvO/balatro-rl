@@ -22,6 +22,13 @@ class JokerType(IntEnum):
     BLUEPRINT = 123
 
 
+class Rarity(IntEnum):
+    COMMON = 0
+    UNCOMMON = 1
+    RARE = 2
+    LEGENDARY = 3
+
+
 @dataclasses.dataclass(frozen=True, slots=True)
 class Effect:
     """A scoring contribution. Applied as: chips += chips; mult += mult; mult *= xmult."""
@@ -52,6 +59,7 @@ class JokerState:
     type: JokerType
     edition: int = 0      # 0 = base (editions are a later plan)
     counter: float = 0.0
+    sell_bonus: int = 0   # extra sell value beyond floor(cost/2), e.g. from Egg
 
 
 @dataclasses.dataclass(slots=True)
@@ -74,6 +82,8 @@ class JokerEffect:
     scoring hooks (passive/rule/economy jokers set it False — see wiki).
     """
     copyable: bool = True
+    rarity: "Rarity" = None      # set by each joker; Rarity enum
+    cost: int = 4                # base shop buy price ($); set by each joker
 
     def independent(self, ctx, js: "JokerState") -> Effect:
         return NO_EFFECT
