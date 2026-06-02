@@ -1,4 +1,6 @@
-from balatro_rl.viz.viewer import render_step, build_demo
+import os
+
+from balatro_rl.viz.viewer import build_demo, list_episodes, render_step
 
 
 _STEPS = [
@@ -38,3 +40,12 @@ def test_build_demo_constructs():
     demo = build_demo()                               # builds the gr.Blocks app (does not launch)
     import gradio as gr
     assert isinstance(demo, gr.Blocks)
+
+
+def test_list_episodes_excludes_logs_and_summary(tmp_path):
+    (tmp_path / "a.episode.json").write_text("[]")
+    (tmp_path / "b.episode.json").write_text("[]")
+    (tmp_path / "shaped_ent010__seed0.log").write_text("update 0 | loss ...")  # training log
+    (tmp_path / "summary.json").write_text("{}")                                # scalars
+    names = {os.path.basename(p) for p in list_episodes(str(tmp_path))}
+    assert names == {"a.episode.json", "b.episode.json"}
