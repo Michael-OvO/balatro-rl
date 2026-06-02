@@ -19,7 +19,6 @@ import itertools
 import numpy as np
 
 from ..engine.engine import Verb, legal_actions
-from ..engine.state import Phase
 
 MAX_HAND = 8
 MAX_SELECT = 5
@@ -63,7 +62,7 @@ def decode(action_id: int):
     raise ValueError(f"action_id out of range: {action_id}")
 
 
-def _encode(verb, arg) -> int:
+def encode_action(verb, arg) -> int:
     """Engine (Verb, arg) -> flat id (inverse of decode)."""
     if verb == Verb.PLAY:
         return _SUBSET_INDEX[tuple(arg)]
@@ -84,7 +83,8 @@ def _encode(verb, arg) -> int:
 
 def legal_mask(state) -> np.ndarray:
     """Boolean array of length NUM_ACTIONS: True where the flat id is legal now."""
+    assert len(state.hand) <= MAX_HAND, f"hand of {len(state.hand)} exceeds MAX_HAND={MAX_HAND} (hand-size mods not yet supported)"
     mask = np.zeros(NUM_ACTIONS, dtype=np.bool_)
     for verb, arg in legal_actions(state):
-        mask[_encode(verb, arg)] = True
+        mask[encode_action(verb, arg)] = True
     return mask

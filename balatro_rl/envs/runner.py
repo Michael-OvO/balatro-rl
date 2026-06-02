@@ -23,6 +23,7 @@ class Trajectory:
     total_reward: float
     final_ante: int
     won: bool
+    truncated: bool = False
 
     def save(self, path):
         with open(path, "w") as f:
@@ -35,7 +36,7 @@ class Trajectory:
 
 
 def run_episode(env: BalatroEnv, agent, seed: int) -> Trajectory:
-    obs, mask = env.reset(seed)
+    _, mask = env.reset(seed)
     actions: list[int] = []
     total = 0.0
     done = False
@@ -44,10 +45,12 @@ def run_episode(env: BalatroEnv, agent, seed: int) -> Trajectory:
             break
         a = int(agent.act(env.state, mask))
         actions.append(a)
-        obs, reward, done, info, mask = env.step(a)
+        _, reward, done, info, mask = env.step(a)
         total += reward
+    truncated = not done
     return Trajectory(seed=seed, actions=actions, total_reward=total,
-                      final_ante=env.state.ante, won=bool(env.state.won))
+                      final_ante=env.state.ante, won=bool(env.state.won),
+                      truncated=truncated)
 
 
 def replay(traj: Trajectory):

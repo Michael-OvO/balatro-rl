@@ -10,7 +10,7 @@ import math
 
 import numpy as np
 
-from ..engine.state import GameState, Phase
+from ..engine.state import GameState
 from .actions import MAX_HAND, MAX_JOKERS, MAX_SHOP
 
 CARD_FEAT = 17        # rank one-hot(13) + suit one-hot(4)

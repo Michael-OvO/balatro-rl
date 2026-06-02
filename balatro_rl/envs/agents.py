@@ -9,7 +9,7 @@ import numpy as np
 from ..engine.engine import Verb, legal_actions
 from ..engine.scoring import score_play
 from ..engine.state import Phase
-from .actions import decode, legal_mask, _encode
+from .actions import encode_action
 
 
 class RandomAgent:
@@ -29,19 +29,19 @@ class GreedyAgent:
         if state.phase == Phase.SHOP:
             for verb, arg in legal_actions(state):
                 if verb == Verb.BUY:
-                    return _encode(verb, arg)
-            return _encode(Verb.LEAVE_SHOP, 0)
+                    return encode_action(verb, arg)
+            return encode_action(Verb.LEAVE_SHOP, 0)
         # PLAYING: choose the best-scoring PLAY; fall back to a discard if no play.
         best_id, best_score = None, -1
         for verb, arg in legal_actions(state):
             if verb == Verb.PLAY:
                 sc = score_play([state.hand[i] for i in arg]).score
                 if sc > best_score:
-                    best_score, best_id = sc, _encode(verb, arg)
+                    best_score, best_id = sc, encode_action(verb, arg)
         if best_id is not None:
             return best_id
         # no play available (e.g. 0 hands left but discards remain): discard lowest few
         for verb, arg in legal_actions(state):
             if verb == Verb.DISCARD:
-                return _encode(verb, arg)
+                return encode_action(verb, arg)
         return int(np.flatnonzero(mask)[0])
