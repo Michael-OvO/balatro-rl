@@ -22,6 +22,31 @@ class JokerType(IntEnum):
     BLUEPRINT = 123
     GOLDEN_JOKER = 90
     EGG = 46
+    # --- Batch 1 ---
+    LUSTY = 3
+    WRATHFUL = 4
+    GLUTTONOUS = 5
+    JOLLY = 6
+    ZANY = 7
+    MAD = 8
+    CRAZY = 9
+    DROLL = 10
+    SLY = 11
+    WILY = 12
+    CLEVER = 13
+    DEVIOUS = 14
+    CRAFTY = 15
+    HALF = 16
+    FIBONACCI = 31
+    GROS_MICHEL = 38
+    EVEN_STEVEN = 39
+    ODD_TODD = 40
+    SCHOLAR = 41
+    RUNNER = 49
+    ICE_CREAM = 50
+    WALKIE_TALKIE = 101
+    SMILEY_FACE = 104
+    SOCK_AND_BUSKIN = 109
 
 
 class Rarity(IntEnum):
@@ -75,6 +100,7 @@ class ScoreContext:
     hand_type: object = None
     rules: RuleFlags = NO_RULES
     first_face_idx: int | None = None
+    contains: frozenset = frozenset()
 
 
 class JokerEffect:

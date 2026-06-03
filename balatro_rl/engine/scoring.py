@@ -12,7 +12,7 @@ from __future__ import annotations
 import dataclasses
 
 from .cards import Card, rank_chip_value
-from .hands import HAND_BASE, HandType, evaluate, is_face
+from .hands import HAND_BASE, HandType, contains, evaluate, is_face
 from .jokers.base import (
     NO_RULES, ScoreContext, aggregate_rules, resolve_providers,
 )
@@ -44,7 +44,8 @@ def score_play(played, jokers: tuple = (), held: tuple = ()) -> ScoreResult:
 
     ctx = ScoreContext(chips=base_chips, mult=float(base_mult), played=played,
                        scoring_idx=list(scoring_idx), held=list(held),
-                       hand_type=hand_type, rules=rules)
+                       hand_type=hand_type, rules=rules,
+                       contains=contains(played))
     ctx.first_face_idx = next((i for i in scoring_idx if is_face(played[i], rules)), None)
     providers = resolve_providers(jokers)
 

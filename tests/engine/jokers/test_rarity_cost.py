@@ -29,3 +29,37 @@ def test_existing_jokers_declare_rarity_and_cost():
         eff = REGISTRY[jt]
         assert eff.rarity == rar, jt
         assert eff.cost == cost, jt
+
+
+def test_batch1_jokers_declare_rarity_and_cost():
+    # wiki: docs/reference/jokers.md
+    expected = {
+        JokerType.LUSTY: (Rarity.COMMON, 5),
+        JokerType.WRATHFUL: (Rarity.COMMON, 5),
+        JokerType.GLUTTONOUS: (Rarity.COMMON, 5),
+        JokerType.JOLLY: (Rarity.COMMON, 3),
+        JokerType.ZANY: (Rarity.COMMON, 4),
+        JokerType.MAD: (Rarity.COMMON, 4),
+        JokerType.CRAZY: (Rarity.COMMON, 4),
+        JokerType.DROLL: (Rarity.COMMON, 4),
+        JokerType.SLY: (Rarity.COMMON, 3),
+        JokerType.WILY: (Rarity.COMMON, 4),
+        JokerType.CLEVER: (Rarity.COMMON, 4),
+        JokerType.DEVIOUS: (Rarity.COMMON, 4),
+        JokerType.CRAFTY: (Rarity.COMMON, 4),
+        JokerType.HALF: (Rarity.COMMON, 5),
+        JokerType.FIBONACCI: (Rarity.UNCOMMON, 8),
+        JokerType.GROS_MICHEL: (Rarity.COMMON, 5),
+        JokerType.EVEN_STEVEN: (Rarity.COMMON, 4),
+        JokerType.ODD_TODD: (Rarity.COMMON, 4),
+        JokerType.SCHOLAR: (Rarity.COMMON, 4),
+        JokerType.RUNNER: (Rarity.COMMON, 5),
+        JokerType.ICE_CREAM: (Rarity.COMMON, 5),
+        JokerType.WALKIE_TALKIE: (Rarity.COMMON, 4),
+        JokerType.SMILEY_FACE: (Rarity.COMMON, 4),
+        JokerType.SOCK_AND_BUSKIN: (Rarity.UNCOMMON, 6),
+    }
+    for jt, (rar, cost) in expected.items():
+        eff = REGISTRY[jt]
+        assert eff.rarity == rar, jt
+        assert eff.cost == cost, jt

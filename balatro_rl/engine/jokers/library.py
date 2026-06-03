@@ -5,7 +5,7 @@ from __future__ import annotations
 
 import dataclasses
 
-from ..hands import is_face
+from ..hands import HandType, contains, is_face
 from .base import Effect, JokerEffect, JokerState, JokerType, Rarity, RuleFlags, register
 
 
@@ -119,3 +119,217 @@ class _Egg(JokerEffect):  # wiki: /w/Egg  — gains +$3 sell value at end of rou
     cost = 4
     def on_round_end(self, state, js, rng):
         return dataclasses.replace(js, sell_bonus=js.sell_bonus + 3), 0, False, rng
+
+
+# --- Batch 1: suit on-scored (+3 Mult per scored card of a suit) ---
+
+@register(JokerType.LUSTY)
+class _Lusty(JokerEffect):  # wiki: /w/Lusty_Joker  — +3 Mult per scored Heart
+    rarity = Rarity.COMMON
+    cost = 5
+    def on_score(self, ctx, card, index, js):
+        return Effect(mult=3) if card.suit == 1 else Effect()
+
+
+@register(JokerType.WRATHFUL)
+class _Wrathful(JokerEffect):  # wiki: /w/Wrathful_Joker  — +3 Mult per scored Spade
+    rarity = Rarity.COMMON
+    cost = 5
+    def on_score(self, ctx, card, index, js):
+        return Effect(mult=3) if card.suit == 0 else Effect()
+
+
+@register(JokerType.GLUTTONOUS)
+class _Gluttonous(JokerEffect):  # wiki: /w/Gluttonous_Joker  — +3 Mult per scored Club
+    rarity = Rarity.COMMON
+    cost = 5
+    def on_score(self, ctx, card, index, js):
+        return Effect(mult=3) if card.suit == 2 else Effect()
+
+
+# --- Batch 1: hand-type +Mult (independent) ---
+
+@register(JokerType.JOLLY)
+class _Jolly(JokerEffect):  # wiki: /w/Jolly_Joker  — +8 Mult if hand contains a Pair
+    rarity = Rarity.COMMON
+    cost = 3
+    def independent(self, ctx, js):
+        return Effect(mult=8) if HandType.PAIR in ctx.contains else Effect()
+
+
+@register(JokerType.ZANY)
+class _Zany(JokerEffect):  # wiki: /w/Zany_Joker  — +12 Mult if contains Three of a Kind
+    rarity = Rarity.COMMON
+    cost = 4
+    def independent(self, ctx, js):
+        return Effect(mult=12) if HandType.THREE_OF_A_KIND in ctx.contains else Effect()
+
+
+@register(JokerType.MAD)
+class _Mad(JokerEffect):  # wiki: /w/Mad_Joker  — +10 Mult if contains Two Pair
+    rarity = Rarity.COMMON
+    cost = 4
+    def independent(self, ctx, js):
+        return Effect(mult=10) if HandType.TWO_PAIR in ctx.contains else Effect()
+
+
+@register(JokerType.CRAZY)
+class _Crazy(JokerEffect):  # wiki: /w/Crazy_Joker  — +12 Mult if contains a Straight
+    rarity = Rarity.COMMON
+    cost = 4
+    def independent(self, ctx, js):
+        return Effect(mult=12) if HandType.STRAIGHT in ctx.contains else Effect()
+
+
+@register(JokerType.DROLL)
+class _Droll(JokerEffect):  # wiki: /w/Droll_Joker  — +10 Mult if contains a Flush
+    rarity = Rarity.COMMON
+    cost = 4
+    def independent(self, ctx, js):
+        return Effect(mult=10) if HandType.FLUSH in ctx.contains else Effect()
+
+
+# --- Batch 1: hand-type +Chips (independent) ---
+
+@register(JokerType.SLY)
+class _Sly(JokerEffect):  # wiki: /w/Sly_Joker  — +50 Chips if contains a Pair
+    rarity = Rarity.COMMON
+    cost = 3
+    def independent(self, ctx, js):
+        return Effect(chips=50) if HandType.PAIR in ctx.contains else Effect()
+
+
+@register(JokerType.WILY)
+class _Wily(JokerEffect):  # wiki: /w/Wily_Joker  — +100 Chips if contains Three of a Kind
+    rarity = Rarity.COMMON
+    cost = 4
+    def independent(self, ctx, js):
+        return Effect(chips=100) if HandType.THREE_OF_A_KIND in ctx.contains else Effect()
+
+
+@register(JokerType.CLEVER)
+class _Clever(JokerEffect):  # wiki: /w/Clever_Joker  — +80 Chips if contains Two Pair
+    rarity = Rarity.COMMON
+    cost = 4
+    def independent(self, ctx, js):
+        return Effect(chips=80) if HandType.TWO_PAIR in ctx.contains else Effect()
+
+
+@register(JokerType.DEVIOUS)
+class _Devious(JokerEffect):  # wiki: /w/Devious_Joker  — +100 Chips if contains a Straight
+    rarity = Rarity.COMMON
+    cost = 4
+    def independent(self, ctx, js):
+        return Effect(chips=100) if HandType.STRAIGHT in ctx.contains else Effect()
+
+
+@register(JokerType.CRAFTY)
+class _Crafty(JokerEffect):  # wiki: /w/Crafty_Joker  — +80 Chips if contains a Flush
+    rarity = Rarity.COMMON
+    cost = 4
+    def independent(self, ctx, js):
+        return Effect(chips=80) if HandType.FLUSH in ctx.contains else Effect()
+
+
+@register(JokerType.HALF)
+class _Half(JokerEffect):  # wiki: /w/Half_Joker  — +20 Mult if played hand has <=3 cards
+    rarity = Rarity.COMMON
+    cost = 5
+    def independent(self, ctx, js):
+        return Effect(mult=20) if len(ctx.played) <= 3 else Effect()
+
+
+# --- Batch 1: on-scored per-card ---
+
+@register(JokerType.FIBONACCI)
+class _Fibonacci(JokerEffect):  # wiki: /w/Fibonacci  — each played A,2,3,5,8 gives +8 Mult
+    rarity = Rarity.UNCOMMON
+    cost = 8
+    def on_score(self, ctx, card, index, js):
+        return Effect(mult=8) if card.rank in (14, 2, 3, 5, 8) else Effect()
+
+
+@register(JokerType.EVEN_STEVEN)
+class _EvenSteven(JokerEffect):  # wiki: /w/Even_Steven  — even-rank scored cards give +4 Mult
+    rarity = Rarity.COMMON
+    cost = 4
+    def on_score(self, ctx, card, index, js):
+        return Effect(mult=4) if card.rank in (2, 4, 6, 8, 10) else Effect()
+
+
+@register(JokerType.ODD_TODD)
+class _OddTodd(JokerEffect):  # wiki: /w/Odd_Todd  — odd-rank scored cards give +31 Chips (Ace counts odd)
+    rarity = Rarity.COMMON
+    cost = 4
+    def on_score(self, ctx, card, index, js):
+        return Effect(chips=31) if card.rank in (3, 5, 7, 9, 14) else Effect()
+
+
+@register(JokerType.SCHOLAR)
+class _Scholar(JokerEffect):  # wiki: /w/Scholar  — scored Aces give +20 Chips and +4 Mult
+    rarity = Rarity.COMMON
+    cost = 4
+    def on_score(self, ctx, card, index, js):
+        return Effect(chips=20, mult=4) if card.rank == 14 else Effect()
+
+
+@register(JokerType.WALKIE_TALKIE)
+class _WalkieTalkie(JokerEffect):  # wiki: /w/Walkie_Talkie  — each scored 10 or 4 gives +10 Chips +4 Mult
+    rarity = Rarity.COMMON
+    cost = 4
+    def on_score(self, ctx, card, index, js):
+        return Effect(chips=10, mult=4) if card.rank in (10, 4) else Effect()
+
+
+@register(JokerType.SMILEY_FACE)
+class _SmileyFace(JokerEffect):  # wiki: /w/Smiley_Face  — scored face cards give +5 Mult
+    rarity = Rarity.COMMON
+    cost = 4
+    def on_score(self, ctx, card, index, js):
+        return Effect(mult=5) if is_face(card, ctx.rules) else Effect()
+
+
+# --- Batch 1: retrigger ---
+
+@register(JokerType.SOCK_AND_BUSKIN)
+class _SockAndBuskin(JokerEffect):  # wiki: /w/Sock_and_Buskin  — retrigger all played face cards
+    rarity = Rarity.UNCOMMON
+    cost = 6
+    def retrigger(self, ctx, card, js):
+        return 1 if is_face(card, ctx.rules) else 0
+
+
+# --- Batch 1: independent + economy ---
+
+@register(JokerType.GROS_MICHEL)
+class _GrosMichel(JokerEffect):  # wiki: /w/Gros_Michel  — +15 Mult; 1 in 6 self-destroy at end of round
+    rarity = Rarity.COMMON
+    cost = 5
+    def independent(self, ctx, js):
+        return Effect(mult=15)
+    def on_round_end(self, state, js, rng):
+        roll, rng = rng.random()
+        return js, 0, roll < 1 / 6, rng
+
+
+# --- Batch 1: scaling ---
+
+@register(JokerType.RUNNER)
+class _Runner(JokerEffect):  # wiki: /w/Runner  — +15 Chips per played hand that contains a Straight (start +0)
+    rarity = Rarity.COMMON
+    cost = 5
+    def independent(self, ctx, js):
+        return Effect(chips=int(js.counter))
+    def on_play(self, state, played, scoring_idx, rules, js):
+        bump = 15.0 if HandType.STRAIGHT in contains(list(played)) else 0.0
+        return dataclasses.replace(js, counter=js.counter + bump)
+
+
+@register(JokerType.ICE_CREAM)
+class _IceCream(JokerEffect):  # wiki: /w/Ice_Cream  — +100 Chips, -5 per hand played (counter starts 0)
+    rarity = Rarity.COMMON
+    cost = 5
+    def independent(self, ctx, js):
+        return Effect(chips=max(0, 100 - 5 * int(js.counter)))
+    def on_play(self, state, played, scoring_idx, rules, js):
+        return dataclasses.replace(js, counter=js.counter + 1.0)

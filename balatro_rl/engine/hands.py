@@ -61,6 +61,50 @@ def is_face(card: Card, rules: RuleFlags = NO_RULES) -> bool:
     return rules.all_face or card.rank in (11, 12, 13)
 
 
+def contains(cards: list[Card]) -> frozenset[HandType]:
+    """Sub-hands the played cards *contain* (Balatro "contains" semantics).
+
+    A hand contains a sub-hand if the cards include it, which differs from "is":
+    a Four-of-a-Kind contains a Pair and a Three-of-a-Kind but NOT a Two Pair
+    (it is one rank, not two distinct paired ranks); a Full House contains all of
+    Pair/Two Pair/Three of a Kind/Full House. STRAIGHT/FLUSH need 5 cards.
+    HIGH_CARD is never reported.
+    """
+    ranks = [c.rank for c in cards]
+    suits = [c.suit for c in cards]
+    rank_counts = Counter(ranks)
+    pairs = [r for r, c in rank_counts.items() if c >= 2]
+    has_trip = any(c >= 3 for c in rank_counts.values())
+    has_quad = any(c >= 4 for c in rank_counts.values())
+    # Full House: a rank with count>=3 AND a DIFFERENT rank with count>=2.
+    has_full = any(c >= 3 for c in rank_counts.values()) and any(
+        r2 != r1 and c2 >= 2
+        for r1, c1 in rank_counts.items() if c1 >= 3
+        for r2, c2 in rank_counts.items()
+    )
+    is_flush = len(cards) == 5 and len(set(suits)) == 1
+    is_straight = len(cards) == 5 and _is_straight(ranks)
+
+    out: set[HandType] = set()
+    if len(pairs) >= 1:
+        out.add(HandType.PAIR)
+    if len(pairs) >= 2:
+        out.add(HandType.TWO_PAIR)
+    if has_trip:
+        out.add(HandType.THREE_OF_A_KIND)
+    if has_quad:
+        out.add(HandType.FOUR_OF_A_KIND)
+    if has_full:
+        out.add(HandType.FULL_HOUSE)
+    if is_straight:
+        out.add(HandType.STRAIGHT)
+    if is_flush:
+        out.add(HandType.FLUSH)
+    if is_straight and is_flush:
+        out.add(HandType.STRAIGHT_FLUSH)
+    return frozenset(out)
+
+
 def evaluate(cards: list[Card], rules: RuleFlags = NO_RULES) -> tuple[HandType, tuple[int, ...]]:
     """Best (HandType, scoring-card indices) for 1..5 played cards.
 
