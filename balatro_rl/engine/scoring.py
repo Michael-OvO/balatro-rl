@@ -12,7 +12,7 @@ from __future__ import annotations
 import dataclasses
 
 from .cards import Card, Edition, Enhancement, Seal, is_stone, rank_chip_value
-from .hands import HAND_BASE, HandType, contains, evaluate, is_face
+from .hands import HandType, contains, evaluate, is_face, leveled_base
 from .jokers.base import (
     DECK_ENH_ZEROS, NO_RULES, ScoreContext, aggregate_rules, resolve_providers,
 )
@@ -113,7 +113,7 @@ def score_play(played, jokers: tuple = (), held: tuple = (), *,
                discards_left: int = 0, deck_count: int = 0,
                hand_plays_run: tuple = (), hand_plays_round: tuple = (),
                deck_enh_counts: tuple = (), debuffed_idx: tuple = (),
-               flint: bool = False, rng=None) -> ScoreResult:
+               levels: tuple = (), flint: bool = False, rng=None) -> ScoreResult:
     """Score one played hand.
 
     The keyword-only scalars carry read-only game-state info to state-reading
@@ -129,6 +129,10 @@ def score_play(played, jokers: tuple = (), held: tuple = (), *,
     over GameState.master_deck) for jokers that scale off owned enhanced cards (Steel
     Joker X Mult per Steel, Stone Joker +Chips per Stone). Empty (default) normalizes to
     all-zeros on the context, so pure-scoring callers still construct.
+
+    `levels` is the 12-tuple of per-HandType levels (Planet upgrades). The hand's base
+    Chips/Mult scale with its level (leveled_base); empty/all-1 reproduces HAND_BASE
+    exactly, so an un-leveled game is byte-identical.
 
     `rng` feeds probabilistic scoring jokers (Misprint, Bloodstone) AND probabilistic
     card mods (Lucky's two rolls, Glass's shatter roll). Hooks consume it by reassigning
@@ -158,7 +162,7 @@ def score_play(played, jokers: tuple = (), held: tuple = (), *,
         scoring_idx = tuple(
             i for i in range(len(played))
             if i in present or is_stone(played[i]))
-    base_chips, base_mult = HAND_BASE[hand_type]
+    base_chips, base_mult = leveled_base(hand_type, levels)   # Planet upgrades raise these
     if flint:
         # The Flint halves the hand's base Chips and Mult, rounded UP (wiki: 5x1 -> 3x1).
         base_chips = -(-base_chips // 2)

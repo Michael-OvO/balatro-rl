@@ -284,7 +284,8 @@ def step(state: GameState, action: tuple[Verb, tuple[int, ...]]) -> tuple[GameSt
                      hand_plays_run=state.hand_plays_run,
                      hand_plays_round=state.hand_plays_round,
                      deck_enh_counts=_deck_enh_histogram(state.master_deck),
-                     debuffed_idx=debuffed, flint=boss_halves_base(boss), rng=state.rng)
+                     debuffed_idx=debuffed, levels=state.levels,
+                     flint=boss_halves_base(boss), rng=state.rng)
     # Probabilistic scoring jokers (Misprint, Bloodstone) consumed state.rng; the
     # advanced rng rides back on res.rng and MUST be written into every successor
     # state below so a fixed seed reproduces the same rolls deterministically.
