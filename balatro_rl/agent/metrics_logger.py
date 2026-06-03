@@ -79,6 +79,12 @@ class ConsoleLogger:
             parts.append("(" + " ".join(sub) + ")")
         if "train/mean_reward" in m:
             parts.append(f"reward {m['train/mean_reward']:.4f}")
+        for key, label, fmt in (("train/req_scale", "scale", "{:.2f}"),
+                                ("train/clear_rate", "clear", "{:.2f}"),
+                                ("train/max_ante", "ante", "{:.0f}"),
+                                ("train/max_round_score", "maxchips", "{:.0f}")):
+            if key in m:
+                parts.append(f"{label} {fmt.format(m[key])}")
         return parts or [ConsoleLogger._generic(m)]
 
     @classmethod

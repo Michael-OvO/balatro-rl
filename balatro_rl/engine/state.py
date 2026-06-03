@@ -31,6 +31,12 @@ class GameState:
     discards_left: int
     hand_size: int
     levels: tuple[int, ...]     # 12 hand-type levels (HandType order)
+    # Times each HandType has been played, in HandType order (mirrors `levels`).
+    # _run never resets; _round resets to zeros at each blind boundary. Both are
+    # incremented AFTER a played hand is scored (so a joker scoring THAT hand sees
+    # the PRE-increment count via ScoreContext.hand_plays_run / _round).
+    hand_plays_run: tuple[int, ...]
+    hand_plays_round: tuple[int, ...]
     money: int
     rng: RNG
     phase: Phase
@@ -41,3 +47,15 @@ class GameState:
     rerolls_done: int = 0      # rerolls used in the current shop (for reroll cost)
     shop_steps: int = 0        # actions taken this shop visit; bounds shop dithering
     req_scale: float = 1.0     # curriculum: scales the blind score target (1.0 = real game)
+    # The persistent set of owned cards (the 52-card master deck) WITH their mod
+    # fields. Each blind reshuffles the working `deck` FROM this, so any card mod
+    # (enhancement/edition/seal) rides forward across blinds. Defaults to () for
+    # back-compat with directly-constructed states; reset() seeds it from
+    # standard_deck(). Card destruction (Glass) drops entries from here.
+    master_deck: tuple[Card, ...] = ()
+    # Active boss on the current blind (BossEffect int; 0 = NONE / no boss). Set by
+    # _advance_blind when entering the boss blind with bosses enabled; 0 on small/big
+    # blinds and whenever bosses are disabled. `bosses_enabled` gates boss selection so
+    # the default game is byte-identical (the agent stays boss-blind until the retrain).
+    boss: int = 0
+    bosses_enabled: bool = False

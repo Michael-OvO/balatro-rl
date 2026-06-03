@@ -82,9 +82,22 @@ def encode_action(verb, arg) -> int:
 
 
 def legal_mask(state) -> np.ndarray:
-    """Boolean array of length NUM_ACTIONS: True where the flat id is legal now."""
-    assert len(state.hand) <= MAX_HAND, f"hand of {len(state.hand)} exceeds MAX_HAND={MAX_HAND} (hand-size mods not yet supported)"
+    """Boolean array of length NUM_ACTIONS: True where the flat id is legal now.
+
+    The flat action space only enumerates card subsets over MAX_HAND=8 slots.
+    A hand of a different size is handled gracefully (no assert): PLAY/DISCARD
+    actions are clamped/masked to the present min(len(hand), MAX_HAND) slots, so a
+    larger hand only offers subsets over the first 8 slots (indices >= MAX_HAND
+    stay illegal because they have no flat id) and a smaller hand offers fewer
+    subsets (absent slots stay illegal). For the current game (hand always 8) the
+    mask is byte-identical to enumerating every engine action directly.
+    """
     mask = np.zeros(NUM_ACTIONS, dtype=np.bool_)
     for verb, arg in legal_actions(state):
+        # Subset actions referencing a slot >= MAX_HAND have no flat encoding;
+        # skip them (they mask out) instead of raising. Non-subset (shop) args
+        # are scalars/pairs over fixed-size slots and always encode.
+        if verb in (Verb.PLAY, Verb.DISCARD) and any(i >= MAX_HAND for i in arg):
+            continue
         mask[encode_action(verb, arg)] = True
     return mask

@@ -165,6 +165,7 @@ def train(cfg: TrainConfig, logger=None) -> TrainResult:
             cur_scale = float(cfg.req_scale_schedule(len(losses)))
             venv.set_req_scale(cur_scale)
         update_clears = update_dones = 0
+        update_max_ante, update_max_hand_score, update_max_round = 1, 0, 0
         buf = {
             "obs": {k: np.zeros((T, N) + v.shape[1:], v.dtype) for k, v in next_obs.items()},
             "masks": np.zeros((T, N, NUM_ACTIONS), bool),
@@ -186,8 +187,16 @@ def train(cfg: TrainConfig, logger=None) -> TrainResult:
             next_obs, rewards, dones, infos, next_mask = venv.step(a)
             buf["rewards"][t] = rewards
             buf["dones"][t] = dones.astype(np.float32)
-            update_clears += sum(1 for info in infos if info.get("cleared"))
             update_dones += int(dones.sum())
+            for info in infos:   # aggregate clears + depth/score reached this rollout
+                if info.get("cleared"):
+                    update_clears += 1
+                if info.get("ante", 1) > update_max_ante:
+                    update_max_ante = info["ante"]
+                if (info.get("score") or 0) > update_max_hand_score:
+                    update_max_hand_score = info["score"]
+                if info.get("round_score", 0) > update_max_round:
+                    update_max_round = info["round_score"]
 
         _, _, last_value, key = act(ts.params, _to_jax(next_obs), jnp.asarray(next_mask), key)
         batch = {
@@ -210,7 +219,9 @@ def train(cfg: TrainConfig, logger=None) -> TrainResult:
         logger.log({"loss/total": total, "loss/policy": pg, "loss/value": vl,
                     "loss/entropy": ent, "train/mean_reward": mean_returns[-1],
                     "train/ent_coef": ec, "train/req_scale": cur_scale,
-                    "train/clear_rate": clear_rate}, step=update_idx)
+                    "train/clear_rate": clear_rate, "train/max_ante": update_max_ante,
+                    "train/max_hand_score": update_max_hand_score,
+                    "train/max_round_score": update_max_round}, step=update_idx)
         if not _open_loop:
             new_scale = _ramp_scale(cur_scale, clear_rate, len(clears_w) == cfg.ramp_window, cfg)
             if new_scale != cur_scale:

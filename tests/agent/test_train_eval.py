@@ -85,6 +85,16 @@ def test_ramp_scale_logic():
     assert _ramp_scale(1.0, 0.9, True, cfg) == 1.0            # already 1.0 -> stays
 
 
+def test_train_logs_max_ante_and_scores():
+    lg = NullLogger()
+    train(TrainConfig(num_updates=2, num_envs=8, num_steps=32, d_model=16,
+                      num_minibatches=2, update_epochs=1), logger=lg)
+    keys = set().union(*[d.keys() for _s, d in lg.history])
+    assert {"train/max_ante", "train/max_hand_score", "train/max_round_score"} <= keys
+    antes = [d["train/max_ante"] for _s, d in lg.history if "train/max_ante" in d]
+    assert antes and all(a >= 1 for a in antes)
+
+
 def test_curriculum_smoke_manufactures_clears():
     lg = NullLogger()
     train(TrainConfig(num_updates=3, num_envs=16, num_steps=64, d_model=32,

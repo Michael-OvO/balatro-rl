@@ -37,4 +37,6 @@ class BalatroEnv:
         reward = float(self._reward(prev, action_id, nxt, info))
         done = bool(nxt.done)
         new_mask = legal_mask(nxt) if not done else np.zeros_like(mask)
+        # surface depth/score so the training loop can log antes & max scores reached
+        info = {**info, "ante": int(nxt.ante), "round_score": int(nxt.round_score)}
         return encode(nxt), reward, done, info, new_mask

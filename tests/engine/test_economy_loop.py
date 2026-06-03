@@ -55,6 +55,37 @@ def test_clearing_nonfinal_boss_advances_ante_after_shop():
     assert s3.phase == Phase.PLAYING and s3.ante == 4 and s3.blind_index == 0
 
 
+def test_to_the_moon_adds_extra_interest_at_cashout():
+    # wiki: /w/To_the_Moon  — extra $1 interest per $5 held at cash-out (capped).
+    s = _clearable(money=20, hands_left=1,
+                   jokers=(JokerState(JokerType.TO_THE_MOON),))
+    s2, _ = step(s, (Verb.PLAY, (0, 1, 2, 3)))   # clear Small; 0 hands left after play
+    # money = 20 + reward(3) + interest(20)=4 + hands(0) + to_the_moon(interest(20)=4) = 31
+    assert s2.money == 31
+
+
+def test_delayed_gratification_pays_when_no_discards_used_at_cashout():
+    # wiki: /w/Delayed_Gratification  — $2 per discard if none used this round.
+    from balatro_rl.engine.engine import DISCARDS_PER_BLIND
+    s = _clearable(money=0, hands_left=1,
+                   jokers=(JokerState(JokerType.DELAYED_GRATIFICATION),))
+    assert s.discards_left == DISCARDS_PER_BLIND      # no discards used
+    s2, _ = step(s, (Verb.PLAY, (0, 1, 2, 3)))
+    # money = 0 + reward(3) + interest(0)=0 + hands(0) + delayed(2*3=6) = 9
+    assert s2.money == 9
+
+
+def test_delayed_gratification_no_pay_after_discard_at_cashout():
+    from balatro_rl.engine.engine import DISCARDS_PER_BLIND
+    s = _clearable(money=0, hands_left=2,
+                   jokers=(JokerState(JokerType.DELAYED_GRATIFICATION),))
+    s, _ = step(s, (Verb.DISCARD, (4,)))             # use a discard -> disqualifies payout
+    assert s.discards_left == DISCARDS_PER_BLIND - 1
+    s2, _ = step(s, (Verb.PLAY, (0, 1, 2, 3)))       # clear; 1 hand left after this play
+    # money = 0 + reward(3) + interest(0)=0 + hands(1 left) + delayed(0) = 4
+    assert s2.money == 4
+
+
 def test_cavendish_self_destroys_during_cashout():
     # Force a sub-0.001 roll so Cavendish self-destroys at cash-out and is dropped.
     from balatro_rl.engine.rng import RNG

@@ -12,7 +12,9 @@ def make_state(**overrides) -> GameState:
         deck=(Card(2, 0),), hand=(Card(3, 0),),
         ante=1, blind_index=0, round_score=0, required=300,
         hands_left=4, discards_left=3, hand_size=8,
-        levels=tuple([1] * 12), money=4,
+        levels=tuple([1] * 12),
+        hand_plays_run=tuple([0] * 12), hand_plays_round=tuple([0] * 12),
+        money=4,
         rng=RNG.from_seed(0), phase=Phase.PLAYING, done=False, won=False,
     )
     base.update(overrides)
