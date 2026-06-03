@@ -15,7 +15,7 @@ import itertools
 from enum import IntEnum
 
 from .blinds import required_score
-from .cards import standard_deck
+from .cards import Enhancement, standard_deck
 from .economy import blind_reward, interest, MONEY_PER_UNUSED_HAND
 from .hands import evaluate
 from .jokers.base import REGISTRY, aggregate_rules
@@ -31,6 +31,7 @@ HAND_SIZE = 8
 MAX_SELECT = 5
 JOKER_SLOTS = 5
 SHOP_ACTION_CAP = 12          # max actions per shop visit; then only LEAVE_SHOP is legal
+GOLD_ENH_ROUND_END = 3        # $ per held Gold-enhancement card at round end (wiki: Gold Card)
 
 
 class Verb(IntEnum):
@@ -62,13 +63,33 @@ def _start_round(state, jokers: tuple, rng):
     return tuple(out), rng
 
 
-def reset(seed: int, scale: float = 1.0) -> GameState:
+def make_master_deck(card_mods=None) -> tuple:
+    """Build a master deck from standard_deck(), optionally applying per-card mods.
+
+    ACQUISITION STOPGAP (Phase B testing + future use): packs/consumables that would
+    normally enhance cards are out of scope, so this is the deterministic way to put
+    enhanced cards into play. `card_mods` maps a canonical deck index (0..51, the
+    standard_deck() order: suit-major, rank-ascending) to a dict of mod fields, e.g.
+    `{0: {"enhancement": Enhancement.GLASS, "seal": Seal.GOLD}}`. Default None ->
+    the plain 52-card deck (byte-identical to the current game). NOT wired into the
+    agent/obs; the agent stays blind to mods until the Phase D retrain.
+    """
+    deck = standard_deck()
+    if card_mods:
+        for idx, fields in card_mods.items():
+            deck[idx] = dataclasses.replace(deck[idx], **fields)
+    return tuple(deck)
+
+
+def reset(seed: int, scale: float = 1.0, card_mods=None) -> GameState:
     rng = RNG.from_seed(seed)
     # The persistent master deck (cards + their mod fields) is the canonical
     # owned-card set. We shuffle the WORKING deck FROM a copy of it. With an
     # unmodified standard_deck() this is byte-identical to the old
     # `rng.shuffle(standard_deck())` (same order in, same rng, same result).
-    master_deck = tuple(standard_deck())
+    # `card_mods` (default None) is an opt-in acquisition stopgap for enhanced
+    # cards; see make_master_deck. The default path is unchanged / byte-identical.
+    master_deck = make_master_deck(card_mods)
     deck, rng = rng.shuffle(list(master_deck))
     hand, deck = _draw([], deck, HAND_SIZE)
     # Start-of-blind fold (jokers is empty at reset, so this is a no-op now, but it
@@ -146,6 +167,10 @@ def _cash_out(state: GameState):
     delta = (blind_reward(state.blind_index)
              + interest(state.money)
              + state.hands_left * MONEY_PER_UNUSED_HAND)
+    # Gold ENHANCEMENT: +$3 for each Gold card still HELD in hand at round end
+    # (wiki: Gold Card). Unmodified hands carry no Gold card -> +$0 (byte-identical).
+    delta += GOLD_ENH_ROUND_END * sum(
+        1 for c in state.hand if c.enhancement == Enhancement.GOLD)
     money = state.money + delta
     rng = state.rng
     kept = []
@@ -204,12 +229,16 @@ def step(state: GameState, action: tuple[Verb, tuple[int, ...]]) -> tuple[GameSt
     # PLAY
     assert state.hands_left > 0, "no hands left"
     held = remaining  # cards still in hand (not played) score in the held phase
+    # debuffed_idx nullifies a played card's enhancement/edition/seal (boss blinds).
+    # Phase B owns the skip in score_play; Phase C will compute the set here. Always
+    # empty for now -> no behavioral change on the current game.
     res = score_play(selected, jokers=state.jokers, held=tuple(held),
                      joker_slots=JOKER_SLOTS, money=state.money,
                      hands_left=state.hands_left, discards_left=state.discards_left,
                      deck_count=len(state.deck),
                      hand_plays_run=state.hand_plays_run,
-                     hand_plays_round=state.hand_plays_round, rng=state.rng)
+                     hand_plays_round=state.hand_plays_round,
+                     debuffed_idx=(), rng=state.rng)
     # Probabilistic scoring jokers (Misprint, Bloodstone) consumed state.rng; the
     # advanced rng rides back on res.rng and MUST be written into every successor
     # state below so a fixed seed reproduces the same rolls deterministically.

@@ -11,7 +11,7 @@ from __future__ import annotations
 
 import dataclasses
 
-from .cards import Card, rank_chip_value
+from .cards import Card, Edition, Enhancement, Seal, is_stone, rank_chip_value
 from .hands import HAND_BASE, HandType, contains, evaluate, is_face
 from .jokers.base import (
     NO_RULES, ScoreContext, aggregate_rules, resolve_providers,
@@ -43,11 +43,57 @@ def _apply(ctx: ScoreContext, eff) -> None:
     ctx.mult *= eff.xmult
 
 
+def _score_card_mods(ctx: ScoreContext, card: Card) -> None:
+    """Apply a SCORED card's enhancement/edition/seal (wiki-verified values).
+
+    Additive (+chips/+mult) is applied before multiplicative (xmult), matching the
+    base fold order. RNG is consumed ONLY by Lucky (its two independent rolls) and
+    nothing else here, so an unmodified card draws zero rng -> byte-identical to
+    the pre-Phase-B game. Glass shatter is rolled separately, after all scoring.
+    Seal money (Gold) and Lucky money flow into ctx.money_delta, never the product.
+    Callers MUST skip debuffed cards (their mods are nullified by the boss blind).
+    """
+    enh = card.enhancement
+    # --- enhancement: additive first ---
+    if enh == Enhancement.BONUS:
+        ctx.chips += 30
+    elif enh == Enhancement.MULT:
+        ctx.mult += 4
+    elif enh == Enhancement.STONE:
+        ctx.chips += 50                 # Stone's flat value (it has no rank chips)
+    elif enh == Enhancement.LUCKY:
+        # Two INDEPENDENT rolls: 1-in-5 -> +20 Mult, 1-in-15 -> +$20. Both consume
+        # ctx.rng (mult roll first, then money roll), mirroring how Misprint/
+        # Bloodstone reassign ctx.rng in place; the advanced rng threads back out.
+        roll, ctx.rng = ctx.rng.random()
+        if roll < 1 / 5:
+            ctx.mult += 20
+        roll, ctx.rng = ctx.rng.random()
+        if roll < 1 / 15:
+            ctx.money_delta += 20
+    # --- edition: additive (Foil/Holo) then multiplicative (Poly) ---
+    ed = card.edition
+    if ed == Edition.FOIL:
+        ctx.chips += 50
+    elif ed == Edition.HOLO:
+        ctx.mult += 10
+    # --- enhancement xmult (Glass) then edition xmult (Poly) ---
+    if enh == Enhancement.GLASS:
+        ctx.mult *= 2
+    if ed == Edition.POLY:
+        ctx.mult *= 1.5
+    # --- seal money (Gold pays $3 when the card scores) ---
+    if card.seal == Seal.GOLD:
+        ctx.money_delta += 3
+    # BLUE/PURPLE seals create consumables (planet on round-end-if-held / tarot on
+    # discard) -> DEFERRED to the consumables phase (Phase D); no-op on score here.
+
+
 def score_play(played, jokers: tuple = (), held: tuple = (), *,
                joker_slots: int = 5, money: int = 0, hands_left: int = 0,
                discards_left: int = 0, deck_count: int = 0,
                hand_plays_run: tuple = (), hand_plays_round: tuple = (),
-               rng=None) -> ScoreResult:
+               debuffed_idx: tuple = (), rng=None) -> ScoreResult:
     """Score one played hand.
 
     The keyword-only scalars carry read-only game-state info to state-reading
@@ -59,17 +105,36 @@ def score_play(played, jokers: tuple = (), held: tuple = (), *,
     evaluates and exposes the current-hand count on ScoreContext for Supernova /
     Card Sharp. Empty tuples (default) read as 0 so pure-scoring callers still work.
 
-    `rng` feeds probabilistic scoring jokers (Misprint, Bloodstone). Hooks consume
-    it by reassigning ctx.rng in place; the ADVANCED rng is returned on ScoreResult
-    so the engine can write it back to GameState (keeps a fixed seed deterministic).
-    Defaults to a fixed-seed RNG so pure-scoring callers still construct and roll.
+    `rng` feeds probabilistic scoring jokers (Misprint, Bloodstone) AND probabilistic
+    card mods (Lucky's two rolls, Glass's shatter roll). Hooks consume it by reassigning
+    ctx.rng in place; the ADVANCED rng is returned on ScoreResult so the engine can write
+    it back to GameState (keeps a fixed seed deterministic). Defaults to a fixed-seed RNG
+    so pure-scoring callers still construct and roll. RNG ORDER (per scored card, L->R):
+    joker on_score hooks (incl Bloodstone's per-Heart roll) THEN the card's mod fold
+    (Lucky mult roll, then Lucky money roll); Misprint's roll is independent (phase 3).
+    Glass shatter is rolled once per surviving Glass scoring card AFTER all scoring. Only
+    cards that actually carry Lucky/Glass consume rng, so an all-unmodified hand draws
+    exactly the same rng as before Phase B (byte-identical).
+
+    `debuffed_idx` lists PLAYED-hand indices whose enhancement/edition/seal are NULLIFIED
+    (boss-blind debuff; Phase C supplies it). A debuffed card still scores its normal rank
+    chips, but no mod fires and no mod rng is drawn for it. Always () for the current game.
     """
     if rng is None:
         rng = RNG.from_seed(0)
     played = list(played)
     rules = aggregate_rules(jokers) if jokers else NO_RULES
     hand_type, scoring_idx = evaluate(played, rules)
+    # Stone cards always score even when they otherwise would not (wiki: Stone Card),
+    # so force their indices into the scoring set (like Splash), preserving order and
+    # without duplicating any already scored. Unmodified hands carry no Stone -> no-op.
+    if any(is_stone(c) for c in played):
+        present = set(scoring_idx)
+        scoring_idx = tuple(
+            i for i in range(len(played))
+            if i in present or is_stone(played[i]))
     base_chips, base_mult = HAND_BASE[hand_type]
+    debuffed = frozenset(debuffed_idx)
 
     ht = int(hand_type)
     plays_run = hand_plays_run[ht] if ht < len(hand_plays_run) else 0
@@ -93,20 +158,48 @@ def score_play(played, jokers: tuple = (), held: tuple = (), *,
     # 1) played scoring cards, left to right, with retriggers
     for i in scoring_idx:
         card = played[i]
+        skip_mods = i in debuffed   # boss-blind debuff nullifies this card's mods
         retriggers = sum(eff.retrigger(ctx, card, js) for eff, js in providers)
+        # RED seal retriggers this card once more (re-scoring re-applies everything).
+        if not skip_mods and card.seal == Seal.RED:
+            retriggers += 1
         for _ in range(1 + retriggers):
-            ctx.chips += rank_chip_value(card.rank)
+            # A Stone card has no rank, so it adds no rank chips here; its flat +50
+            # comes from the mod fold below (and is skipped when debuffed).
+            if not is_stone(card):
+                ctx.chips += rank_chip_value(card.rank)
             for eff, js in providers:
                 _apply(ctx, eff.on_score(ctx, card, i, js))
+            if not skip_mods:
+                _score_card_mods(ctx, card)
 
     # 2) held-in-hand cards
     for card in held:
         for eff, js in providers:
             _apply(ctx, eff.on_held(ctx, card, js))
+    # 2b) held-card mods: a held STEEL card gives X1.5 Mult (wiki: Steel Card).
+    # Reuses the held phase; unmodified held cards are a no-op (no Steel present).
+    # NOTE: held cards are not (yet) addressable by boss debuffs, so no debuff skip
+    # here -- Phase C debuffs only ever target PLAYED cards.
+    for card in held:
+        if card.enhancement == Enhancement.STEEL:
+            ctx.mult *= 1.5
 
     # 3) independent jokers, slot order
     for eff, js in providers:
         _apply(ctx, eff.independent(ctx, js))
+
+    # 4) Glass shatter: AFTER all scoring is finished, each scored GLASS card has a
+    # 1-in-4 chance to be destroyed (wiki: Glass Card). One roll per Glass scoring
+    # card, in scoring (L->R) order, consuming ctx.rng only for Glass cards. Debuffed
+    # Glass cannot shatter (its mod is nullified). destroyed_idx holds PLAYED indices.
+    for i in scoring_idx:
+        if i in debuffed:
+            continue
+        if played[i].enhancement == Enhancement.GLASS:
+            roll, ctx.rng = ctx.rng.random()
+            if roll < 1 / 4:
+                ctx.destroyed_idx.append(i)
 
     # int(floor) matches the game. NOTE: in deep Endless, mult is a float and products
     # above 2**53 lose integer precision (scores may differ from the game by >=1 at extreme
