@@ -22,6 +22,7 @@ from .bosses import (
     select_boss,
 )
 from .cards import Enhancement, standard_deck
+from .consumables import apply_consumable
 from .economy import blind_reward, interest, MONEY_PER_UNUSED_HAND
 from .hands import evaluate
 from .jokers.base import HandEvents, NO_RULES, REGISTRY, aggregate_rules
@@ -48,6 +49,7 @@ class Verb(IntEnum):
     REROLL = 4
     REORDER = 5
     LEAVE_SHOP = 6
+    USE = 7        # use a consumable (payload = consumable index); a free action, any phase
 
 
 def _draw(hand: list, deck: list, hand_size: int) -> tuple[list, list]:
@@ -235,8 +237,22 @@ def _enter_cashout_or_win(state: GameState, info: dict):
     return shop, {**info, "cleared": True, "result": "shop", "earned": money - state.money}
 
 
+def _use_consumable(state: GameState, ci: int) -> tuple[GameState, dict]:
+    """Apply the consumable at index `ci` and remove it. A free action (doesn't end the
+    turn or touch hands/discards) usable in any phase. Planets level a hand type; other
+    kinds arrive in later sub-phases."""
+    assert 0 <= ci < len(state.consumables), "no such consumable"
+    con = state.consumables[ci]
+    overrides = apply_consumable(state, con)
+    remaining = state.consumables[:ci] + state.consumables[ci + 1:]
+    nxt = dataclasses.replace(state, consumables=remaining, **overrides)
+    return nxt, {"verb": "use", "kind": con.kind, "type_id": con.type_id}
+
+
 def step(state: GameState, action: tuple[Verb, tuple[int, ...]]) -> tuple[GameState, dict]:
     assert not state.done, "step() called on a terminal state"
+    if action[0] == Verb.USE:        # consumables are usable in any phase (free action)
+        return _use_consumable(state, action[1])
     if state.phase == Phase.SHOP:
         return _shop_step(state, action)
     verb, idx = action
