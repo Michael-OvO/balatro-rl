@@ -11,6 +11,27 @@ the same per-card net kernel; all three touch the global vector).
 
 Full design + critique: workflow `wf_0e0732b9-3b7`.
 
+## Status
+
+- **Phase A (P0 backbone)** — DONE (`dbcfed9`).
+- **Phase B (enhancement/edition/seal scoring + jokers)** — DONE. B1 scoring (`903bca0`);
+  B2a deck-reading/economy jokers + Steel/Stone Joker, Golden Ticket, Rough Gem, Business
+  Card, Reserved Parking (`2522ef6`); B2b-i Glass Joker + Lucky Cat via HandEvents/
+  on_hand_events (`895af0f`); B2b-ii Vampire + Midas Mask via the master-deck mutation
+  channel (`49a2e48`). **80 jokers.**
+- **Phase C (boss blinds, engine-only, gated `enable_bosses` default OFF)** — DONE.
+  C0 backbone+selection+req-mult (`3ed7bb7`); C1 scoring debuffs + The Flint (`bad0c90`);
+  C2 legal-mask + blind-setup (Water/Manacle/Needle/Psychic/Eye/Mouth) (`30c5441`);
+  C3 draw/state (Hook/Serpent/Tooth/Ox) (`036ca73`). Debuff semantics corrected to
+  wiki-true (debuffed card fully inert). **593 tests, zero regressions, all byte-compatible**
+  — the validated ante-7 agent still runs unchanged on its checkpoint.
+- **Phase D (THE RETRAIN)** — NOT STARTED. Pauses for user confirmation before training.
+
+Deferred into Phase D (need agent obs / levels to matter): face-down bosses (House/Wheel/
+Fish/Mark), The Pillar (cross-blind tracking), The Arm (level scoring), finisher effects
+(Amber Acorn/Verdant Leaf/Crimson Heart/Cerulean Bell — Violet Vessel's 6x req is done),
+BLUE/PURPLE seals (need consumables).
+
 ## Build order
 
 ### Phase A — P0 backbone (no agent impact, byte-compatible with the ante-7 checkpoint)
