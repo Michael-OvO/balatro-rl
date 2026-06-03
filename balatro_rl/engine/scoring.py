@@ -16,6 +16,7 @@ from .hands import HAND_BASE, HandType, contains, evaluate, is_face
 from .jokers.base import (
     NO_RULES, ScoreContext, aggregate_rules, resolve_providers,
 )
+from .rng import RNG
 
 
 @dataclasses.dataclass(frozen=True, slots=True)
@@ -25,6 +26,7 @@ class ScoreResult:
     chips: int
     mult: float
     scoring_idx: tuple[int, ...]
+    rng: object = None    # rng after probabilistic hooks consumed it (threaded back to GameState)
 
 
 def _apply(ctx: ScoreContext, eff) -> None:
@@ -38,13 +40,20 @@ def _apply(ctx: ScoreContext, eff) -> None:
 
 def score_play(played, jokers: tuple = (), held: tuple = (), *,
                joker_slots: int = 5, money: int = 0, hands_left: int = 0,
-               discards_left: int = 0, deck_count: int = 0) -> ScoreResult:
+               discards_left: int = 0, deck_count: int = 0, rng=None) -> ScoreResult:
     """Score one played hand.
 
     The keyword-only scalars carry read-only game-state info to state-reading
     jokers (Bull, Banner, Mystic Summit, Blue Joker, ...). The engine threads
     them from GameState; callers that only need pure hand scoring may omit them.
+
+    `rng` feeds probabilistic scoring jokers (Misprint, Bloodstone). Hooks consume
+    it by reassigning ctx.rng in place; the ADVANCED rng is returned on ScoreResult
+    so the engine can write it back to GameState (keeps a fixed seed deterministic).
+    Defaults to a fixed-seed RNG so pure-scoring callers still construct and roll.
     """
+    if rng is None:
+        rng = RNG.from_seed(0)
     played = list(played)
     rules = aggregate_rules(jokers) if jokers else NO_RULES
     hand_type, scoring_idx = evaluate(played, rules)
@@ -58,7 +67,7 @@ def score_play(played, jokers: tuple = (), held: tuple = (), *,
                        n_jokers=n_jokers,
                        empty_joker_slots=max(0, joker_slots - n_jokers),
                        money=money, hands_left=hands_left,
-                       discards_left=discards_left, deck_count=deck_count)
+                       discards_left=discards_left, deck_count=deck_count, rng=rng)
     ctx.first_face_idx = next((i for i in scoring_idx if is_face(played[i], rules)), None)
     providers = resolve_providers(jokers)
 
@@ -84,4 +93,5 @@ def score_play(played, jokers: tuple = (), held: tuple = (), *,
     # above 2**53 lose integer precision (scores may differ from the game by >=1 at extreme
     # antes). Revisit with exact/bignum scoring when Endless is implemented.
     return ScoreResult(score=int(ctx.chips * ctx.mult), hand_type=hand_type,
-                       chips=ctx.chips, mult=ctx.mult, scoring_idx=tuple(scoring_idx))
+                       chips=ctx.chips, mult=ctx.mult, scoring_idx=tuple(scoring_idx),
+                       rng=ctx.rng)

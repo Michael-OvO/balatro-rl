@@ -75,6 +75,12 @@ class JokerType(IntEnum):
     FACELESS_JOKER = 57
     GREEN_JOKER = 58
     RAMEN = 100
+    # --- Batch 5: probabilistic (rng-in-scoring) + per-round randomized state ---
+    MISPRINT = 27
+    BLOODSTONE = 117
+    ANCIENT_JOKER = 99
+    THE_IDOL = 127
+    MAIL_IN_REBATE = 83
 
 
 class Rarity(IntEnum):
@@ -142,6 +148,11 @@ class ScoreContext:
     hands_left: int = 0         # hands remaining this blind
     discards_left: int = 0      # discards remaining this blind
     deck_count: int = 0         # cards left in the draw pile
+    # Probabilistic-scoring RNG. Hooks that consume randomness reassign it in place
+    # (`roll, ctx.rng = ctx.rng.random()`); score_play threads the advanced rng back
+    # out to GameState so a fixed seed reproduces every roll. Defaults to a fixed seed
+    # so contexts built without state still construct (and roll deterministically).
+    rng: object = None
 
 
 class JokerEffect:
@@ -168,6 +179,12 @@ class JokerEffect:
 
     def rules(self) -> RuleFlags:
         return NO_RULES
+
+    def on_round_start(self, state, js: "JokerState", rng):
+        """Start-of-blind lifecycle (folded in engine.reset and _advance_blind).
+        Returns (updated JokerState, rng); rng is threaded for jokers that pick a
+        random per-round target (suit/rank), stashed in js.counter. Default no-op."""
+        return js, rng
 
     def on_play(self, state, played, scoring_idx, rules, js: "JokerState") -> "JokerState":
         """Lifecycle after a hand is played; return updated JokerState (scaling)."""

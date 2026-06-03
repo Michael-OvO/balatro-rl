@@ -578,3 +578,65 @@ class _Ramen(JokerEffect):  # wiki: /w/Ramen  — X2 Mult, -X0.01 per card disca
         return dataclasses.replace(js, counter=js.counter + len(discarded)), 0, rng
     def destroy_when(self, js):
         return js.counter >= 100
+
+
+# --- Batch 5: probabilistic scoring (consume ctx.rng during a PLAY) ---
+
+@register(JokerType.MISPRINT)
+class _Misprint(JokerEffect):  # wiki: /w/Misprint  — +0..+23 Mult (uniform int), changes every hand
+    rarity = Rarity.COMMON
+    cost = 4
+    def independent(self, ctx, js):
+        roll, ctx.rng = ctx.rng.random()
+        return Effect(mult=int(roll * 24))
+
+
+@register(JokerType.BLOODSTONE)
+class _Bloodstone(JokerEffect):  # wiki: /w/Bloodstone  — 1 in 2 chance per scored Heart -> X1.5 Mult
+    rarity = Rarity.UNCOMMON
+    cost = 7
+    def on_score(self, ctx, card, index, js):
+        if card.suit != 1:  # Hearts only; consume the rng for Hearts alone
+            return Effect()
+        roll, ctx.rng = ctx.rng.random()
+        return Effect(xmult=1.5) if roll < 0.5 else Effect()
+
+
+# --- Batch 5: per-round randomized state (on_round_start picks the target) ---
+
+@register(JokerType.ANCIENT_JOKER)
+class _AncientJoker(JokerEffect):  # wiki: /w/Ancient_Joker  — X1.5 Mult per scored card of [suit]; suit re-rolled each round
+    rarity = Rarity.RARE
+    cost = 8
+    def on_round_start(self, state, js, rng):
+        suit, rng = rng.randint(0, 3)
+        return dataclasses.replace(js, counter=float(suit)), rng
+    def on_score(self, ctx, card, index, js):
+        return Effect(xmult=1.5) if card.suit == int(js.counter) else Effect()
+
+
+@register(JokerType.THE_IDOL)
+class _TheIdol(JokerEffect):  # wiki: /w/The_Idol  — X2 Mult per scored [rank] of [suit]; re-rolled each round
+    rarity = Rarity.UNCOMMON
+    cost = 6
+    def on_round_start(self, state, js, rng):
+        rank, rng = rng.randint(2, 14)
+        suit, rng = rng.randint(0, 3)
+        return dataclasses.replace(js, counter=float(rank * 4 + suit)), rng  # encode both
+    def on_score(self, ctx, card, index, js):
+        code = int(js.counter)
+        rank, suit = code // 4, code % 4
+        return Effect(xmult=2.0) if (card.rank == rank and card.suit == suit) else Effect()
+
+
+@register(JokerType.MAIL_IN_REBATE)
+class _MailInRebate(JokerEffect):  # wiki: /w/Mail-In_Rebate  — $5 per discarded [rank]; rank re-rolled each round
+    rarity = Rarity.COMMON
+    cost = 4
+    def on_round_start(self, state, js, rng):
+        rank, rng = rng.randint(2, 14)
+        return dataclasses.replace(js, counter=float(rank)), rng
+    def on_discard(self, state, discarded, js, rng):
+        target = int(js.counter)
+        money = 5 * sum(1 for c in discarded if c.rank == target)
+        return js, money, rng

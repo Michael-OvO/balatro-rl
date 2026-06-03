@@ -44,6 +44,21 @@ def test_batch4_jokers_declare_rarity_and_cost():
         assert eff.cost == cost, jt
 
 
+def test_batch5_jokers_declare_rarity_and_cost():
+    # wiki: /w/Misprint /w/Bloodstone /w/Ancient_Joker /w/The_Idol /w/Mail-In_Rebate
+    expected = {
+        JokerType.MISPRINT: (Rarity.COMMON, 4),
+        JokerType.BLOODSTONE: (Rarity.UNCOMMON, 7),
+        JokerType.ANCIENT_JOKER: (Rarity.RARE, 8),
+        JokerType.THE_IDOL: (Rarity.UNCOMMON, 6),
+        JokerType.MAIL_IN_REBATE: (Rarity.COMMON, 4),
+    }
+    for jt, (rar, cost) in expected.items():
+        eff = REGISTRY[jt]
+        assert eff.rarity == rar, jt
+        assert eff.cost == cost, jt
+
+
 def test_batch1_jokers_declare_rarity_and_cost():
     # wiki: docs/reference/jokers.md
     expected = {
