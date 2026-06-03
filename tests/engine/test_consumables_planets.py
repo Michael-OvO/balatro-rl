@@ -99,6 +99,8 @@ def test_defaults_have_no_consumables():
     assert st.consumables == () and st.consumable_slots == 2
 
 
-def test_legal_actions_does_not_emit_use_yet():
+def test_legal_actions_emits_use_for_owned_consumables():
+    # D2 wires USE into the action space: one (USE, i) per owned consumable, any phase.
     st = dataclasses.replace(reset(seed=0), consumables=(planet(PlanetType.MERCURY),))
-    assert not any(v == Verb.USE for v, _p in legal_actions(st))
+    assert (Verb.USE, 0) in legal_actions(st)
+    assert not any(v == Verb.USE for v, _p in legal_actions(reset(seed=0)))   # none when unowned

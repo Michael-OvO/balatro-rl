@@ -1,12 +1,12 @@
 import numpy as np
 from balatro_rl.engine.engine import Verb, reset, legal_actions, step
 from balatro_rl.engine.state import Phase
-from balatro_rl.envs.actions import NUM_ACTIONS, decode, legal_mask, PLAY_N, SHOP_BASE
+from balatro_rl.envs.actions import NUM_ACTIONS, decode, legal_mask, PLAY_N, SHOP_BASE, _LEAVE
 
 
 def test_action_space_size():
     assert PLAY_N == 218            # C(8,1..5)
-    assert NUM_ACTIONS == 465       # 218 play + 218 discard + 29 shop
+    assert NUM_ACTIONS == 467       # 218 play + 218 discard + 29 shop + 2 USE
 
 
 def test_decode_play_and_discard():
@@ -21,7 +21,9 @@ def test_decode_shop_actions():
     assert decode(SHOP_BASE + 1) == (Verb.BUY, 1)
     assert decode(SHOP_BASE + 2) == (Verb.SELL, 0)
     assert decode(SHOP_BASE + 7) == (Verb.REROLL, 0)
-    assert decode(NUM_ACTIONS - 1) == (Verb.LEAVE_SHOP, 0)
+    assert decode(_LEAVE) == (Verb.LEAVE_SHOP, 0)
+    assert decode(_LEAVE + 1) == (Verb.USE, 0)             # USE ids appended after LEAVE_SHOP
+    assert decode(NUM_ACTIONS - 1) == (Verb.USE, 1)
     v, arg = decode(SHOP_BASE + 8)                          # first reorder
     assert v == Verb.REORDER and isinstance(arg, tuple) and arg[0] != arg[1]
 
@@ -51,4 +53,4 @@ def test_legal_mask_in_shop_only_shop_actions():
     mask = legal_mask(s)
     # No play/discard bits set in the shop.
     assert mask[:2 * PLAY_N].sum() == 0
-    assert mask[NUM_ACTIONS - 1]                 # LEAVE_SHOP always legal
+    assert mask[_LEAVE]                          # LEAVE_SHOP always legal

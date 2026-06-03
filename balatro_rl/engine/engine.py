@@ -131,10 +131,13 @@ def reset(seed: int, scale: float = 1.0, card_mods=None,
 def legal_actions(state: GameState) -> list[tuple[Verb, tuple[int, ...]]]:
     if state.done:
         return []
+    # Consumables can be USEd in any phase (a free action). Empty by default -> no USE
+    # actions, so the action space is byte-identical until consumables are acquired.
+    use = [(Verb.USE, i) for i in range(len(state.consumables))]
     if state.phase == Phase.SHOP:
         if state.shop_steps >= SHOP_ACTION_CAP:
             return [(Verb.LEAVE_SHOP, 0)]          # bound shop dithering -> force progress
-        actions = [(Verb.LEAVE_SHOP, 0)]
+        actions = use + [(Verb.LEAVE_SHOP, 0)]
         for i, offer in enumerate(state.shop_offers):
             if state.money >= joker_cost(offer.type) and len(state.jokers) < JOKER_SLOTS:
                 actions.append((Verb.BUY, i))
@@ -148,7 +151,7 @@ def legal_actions(state: GameState) -> list[tuple[Verb, tuple[int, ...]]]:
                 if i != j:
                     actions.append((Verb.REORDER, (i, j)))
         return actions
-    actions: list[tuple[Verb, tuple[int, ...]]] = []
+    actions: list[tuple[Verb, tuple[int, ...]]] = list(use)
     n = len(state.hand)
     # Boss PLAY restrictions (Psychic exactly-5 / Eye no-repeat / Mouth single-type). Only
     # engaged on those boss blinds; off them `play_filter` is False and the loop is the

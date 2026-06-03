@@ -8,7 +8,7 @@ import numpy as np
 from ..envs.obs import OBS_SHAPES
 
 # Integer-id keys are embedded (nn.Embed); everything else is float32.
-_INT_KEYS = ("joker_types", "shop_types")
+_INT_KEYS = ("joker_types", "shop_types", "consum_types")
 OBS_DTYPES = {k: (np.int32 if k in _INT_KEYS else np.float32) for k in OBS_SHAPES}
 
 

@@ -24,6 +24,7 @@ MAX_HAND = 8
 MAX_SELECT = 5
 MAX_JOKERS = 5     # JOKER_SLOTS
 MAX_SHOP = 2       # CARD_SLOTS
+MAX_CONSUM = 2     # consumable slots (USE action ids)
 
 _SUBSETS: list[tuple[int, ...]] = [
     c for size in range(1, MAX_SELECT + 1) for c in itertools.combinations(range(MAX_HAND), size)
@@ -40,7 +41,8 @@ _SELL0 = SHOP_BASE + MAX_SHOP           # +2..+6
 _REROLL = _SELL0 + MAX_JOKERS           # +7
 _REORDER0 = _REROLL + 1                 # +8..+27
 _LEAVE = _REORDER0 + len(_PAIRS)        # +28
-NUM_ACTIONS = _LEAVE + 1                # 465
+_USE0 = _LEAVE + 1                       # USE consumable 0..MAX_CONSUM-1 (465..466)
+NUM_ACTIONS = _USE0 + MAX_CONSUM         # 467
 
 
 def decode(action_id: int):
@@ -59,6 +61,8 @@ def decode(action_id: int):
         return Verb.REORDER, _PAIRS[action_id - _REORDER0]
     if action_id == _LEAVE:
         return Verb.LEAVE_SHOP, 0
+    if action_id < NUM_ACTIONS:
+        return Verb.USE, action_id - _USE0
     raise ValueError(f"action_id out of range: {action_id}")
 
 
@@ -78,6 +82,8 @@ def encode_action(verb, arg) -> int:
         return _REORDER0 + _PAIR_INDEX[tuple(arg)]
     if verb == Verb.LEAVE_SHOP:
         return _LEAVE
+    if verb == Verb.USE:
+        return _USE0 + arg
     raise ValueError(f"unknown verb: {verb}")
 
 
@@ -98,6 +104,8 @@ def legal_mask(state) -> np.ndarray:
         # skip them (they mask out) instead of raising. Non-subset (shop) args
         # are scalars/pairs over fixed-size slots and always encode.
         if verb in (Verb.PLAY, Verb.DISCARD) and any(i >= MAX_HAND for i in arg):
+            continue
+        if verb == Verb.USE and arg >= MAX_CONSUM:   # no flat id for slots beyond MAX_CONSUM
             continue
         mask[encode_action(verb, arg)] = True
     return mask
