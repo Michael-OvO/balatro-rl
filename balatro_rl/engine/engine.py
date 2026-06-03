@@ -15,11 +15,11 @@ import itertools
 from enum import IntEnum
 
 from .blinds import required_score
-from .bosses import BossEffect, select_boss
+from .bosses import BossEffect, boss_debuffed_idx, boss_halves_base, select_boss
 from .cards import Enhancement, standard_deck
 from .economy import blind_reward, interest, MONEY_PER_UNUSED_HAND
 from .hands import evaluate
-from .jokers.base import HandEvents, REGISTRY, aggregate_rules
+from .jokers.base import HandEvents, NO_RULES, REGISTRY, aggregate_rules
 from .rng import RNG
 from .scoring import score_play
 from .shop import generate_offers, joker_cost, reroll_cost, sell_value, CARD_SLOTS
@@ -250,9 +250,12 @@ def step(state: GameState, action: tuple[Verb, tuple[int, ...]]) -> tuple[GameSt
     # PLAY
     assert state.hands_left > 0, "no hands left"
     held = remaining  # cards still in hand (not played) score in the held phase
-    # debuffed_idx nullifies a played card's enhancement/edition/seal (boss blinds).
-    # Phase B owns the skip in score_play; Phase C will compute the set here. Always
-    # empty for now -> no behavioral change on the current game.
+    rules = aggregate_rules(state.jokers)   # empty jokers -> NO_RULES; reused by the on_play fold
+    # Boss scoring effects (Phase C1): a suit/face boss debuffs the matching played cards
+    # (score_play makes them fully inert), and The Flint halves the hand's base. Both are
+    # no-ops off a boss blind (state.boss == 0) -> byte-identical to the pre-boss game.
+    boss = BossEffect(state.boss)
+    debuffed = boss_debuffed_idx(boss, selected, rules) if state.boss else ()
     res = score_play(selected, jokers=state.jokers, held=tuple(held),
                      joker_slots=JOKER_SLOTS, money=state.money,
                      hands_left=state.hands_left, discards_left=state.discards_left,
@@ -260,7 +263,7 @@ def step(state: GameState, action: tuple[Verb, tuple[int, ...]]) -> tuple[GameSt
                      hand_plays_run=state.hand_plays_run,
                      hand_plays_round=state.hand_plays_round,
                      deck_enh_counts=_deck_enh_histogram(state.master_deck),
-                     debuffed_idx=(), rng=state.rng)
+                     debuffed_idx=debuffed, flint=boss_halves_base(boss), rng=state.rng)
     # Probabilistic scoring jokers (Misprint, Bloodstone) consumed state.rng; the
     # advanced rng rides back on res.rng and MUST be written into every successor
     # state below so a fixed seed reproduces the same rolls deterministically.
@@ -285,7 +288,6 @@ def step(state: GameState, action: tuple[Verb, tuple[int, ...]]) -> tuple[GameSt
         master_deck = tuple(dataclasses.replace(c, enhancement=int(mut[id(c)]))
                             if id(c) in mut else c for c in master_deck)
     # Lifecycle: let scaling jokers (e.g. Ride the Bus) update from this hand.
-    rules = aggregate_rules(state.jokers) if state.jokers else None
     if state.jokers:
         _, scoring_idx = evaluate(list(selected), rules)
         new_jokers = tuple(

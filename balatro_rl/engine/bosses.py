@@ -14,6 +14,8 @@ from __future__ import annotations
 import dataclasses
 from enum import IntEnum
 
+from .hands import is_face
+
 
 class BossEffect(IntEnum):
     NONE = 0
@@ -109,6 +111,34 @@ def eligible_bosses(ante: int) -> list[BossEffect]:
     return [b for b in BossEffect
             if b != BossEffect.NONE and not BOSS_INFO[b].is_finisher
             and BOSS_INFO[b].min_ante <= ante]
+
+
+# --- scoring effects (Phase C1): card debuffs + The Flint base halving -----------
+# Suit encoding matches the rest of the engine: 0=Spade, 1=Heart, 2=Club, 3=Diamond.
+_DEBUFF_SUIT: dict[BossEffect, int] = {
+    BossEffect.THE_GOAD: 0,    # Spades
+    BossEffect.THE_HEAD: 1,    # Hearts
+    BossEffect.THE_CLUB: 2,    # Clubs
+    BossEffect.THE_WINDOW: 3,  # Diamonds
+}
+
+
+def boss_debuffed_idx(boss: BossEffect, played, rules) -> tuple:
+    """Played-hand indices the boss DEBUFFS (suit bosses by suit; The Plant by face card).
+    A debuffed card scores nothing and triggers nothing (the scoring pipeline owns the
+    skip via debuffed_idx) but still forms the poker hand. `rules` binds face detection, so
+    Pareidolia makes The Plant debuff every card. Empty for bosses with no card debuff."""
+    suit = _DEBUFF_SUIT.get(boss)
+    if suit is not None:
+        return tuple(i for i, c in enumerate(played) if c.suit == suit)
+    if boss == BossEffect.THE_PLANT:
+        return tuple(i for i, c in enumerate(played) if is_face(c, rules))
+    return ()
+
+
+def boss_halves_base(boss: BossEffect) -> bool:
+    """The Flint halves the played hand's base Chips and Mult (rounded up in score_play)."""
+    return boss == BossEffect.THE_FLINT
 
 
 def select_boss(rng, ante: int):

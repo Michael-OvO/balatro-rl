@@ -300,10 +300,11 @@ def test_debuffed_card_skips_all_mods():
     # Without debuff: +30 bonus, +50 foil, +$3.
     res = score_play(cards)
     assert res.chips == 30 + 30 + 50 and res.money_delta == 3
-    # Debuffed: the King STILL scores its rank chips but no mod applies.
+    # Debuffed (wiki: /w/Debuffed): the King is fully inert -- no rank chips, no mods, no
+    # money -- but the pair still forms. chips = base 10 + the OTHER King's 10 = 20 -> x2.
     res2 = score_play(cards, debuffed_idx=(0,))
-    assert res2.chips == 30 and res2.money_delta == 0
-    assert res2.score == 60
+    assert res2.chips == 20 and res2.money_delta == 0
+    assert res2.score == 40
 
 
 def test_debuffed_stone_still_scores_but_no_50():

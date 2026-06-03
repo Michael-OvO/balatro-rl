@@ -113,7 +113,7 @@ def score_play(played, jokers: tuple = (), held: tuple = (), *,
                discards_left: int = 0, deck_count: int = 0,
                hand_plays_run: tuple = (), hand_plays_round: tuple = (),
                deck_enh_counts: tuple = (), debuffed_idx: tuple = (),
-               rng=None) -> ScoreResult:
+               flint: bool = False, rng=None) -> ScoreResult:
     """Score one played hand.
 
     The keyword-only scalars carry read-only game-state info to state-reading
@@ -159,6 +159,10 @@ def score_play(played, jokers: tuple = (), held: tuple = (), *,
             i for i in range(len(played))
             if i in present or is_stone(played[i]))
     base_chips, base_mult = HAND_BASE[hand_type]
+    if flint:
+        # The Flint halves the hand's base Chips and Mult, rounded UP (wiki: 5x1 -> 3x1).
+        base_chips = -(-base_chips // 2)
+        base_mult = -(-base_mult // 2)
     debuffed = frozenset(debuffed_idx)
 
     ht = int(hand_type)
@@ -179,7 +183,8 @@ def score_play(played, jokers: tuple = (), held: tuple = (), *,
                        hand_plays_run_max_other=plays_run_max_other,
                        deck_enh_counts=tuple(deck_enh_counts) or DECK_ENH_ZEROS,
                        rng=rng)
-    ctx.first_face_idx = next((i for i in scoring_idx if is_face(played[i], rules)), None)
+    ctx.first_face_idx = next(
+        (i for i in scoring_idx if i not in debuffed and is_face(played[i], rules)), None)
     providers = resolve_providers(jokers)
     # Persistent master_deck enhancement overrides recorded this hand (Vampire strips ->
     # NONE; Midas Mask converts scored faces -> GOLD). vampire_idx marks stripped cards so
@@ -191,29 +196,32 @@ def score_play(played, jokers: tuple = (), held: tuple = (), *,
     # 1) played scoring cards, left to right, with retriggers
     for i in scoring_idx:
         card = played[i]
-        skip_mods = i in debuffed   # boss-blind debuff nullifies this card's mods
+        # A boss-debuffed card is fully INERT: no rank chips, no joker on_score, no
+        # enhancement/edition/seal, no retrigger (wiki: /w/Debuffed). It still occupies a
+        # scoring slot (the hand already formed with it), it just contributes nothing.
+        if i in debuffed:
+            continue
         # Vampire: strip+count this card's enhancement BEFORE it scores (keeps edition/seal).
-        consume = rules.vampire and not skip_mods and card.enhancement != Enhancement.NONE
+        consume = rules.vampire and card.enhancement != Enhancement.NONE
         if consume:
             ctx.vampire_consumed += 1
             mutations.append((i, Enhancement.NONE))
             vampire_idx.add(i)
         # Midas Mask: a scored face card becomes Gold (no on-score effect; persists to deck).
-        if rules.midas and not skip_mods and is_face(card, rules):
+        if rules.midas and is_face(card, rules):
             mutations.append((i, Enhancement.GOLD))
         retriggers = sum(eff.retrigger(ctx, card, js) for eff, js in providers)
         # RED seal retriggers this card once more (re-scoring re-applies everything).
-        if not skip_mods and card.seal == Seal.RED:
+        if card.seal == Seal.RED:
             retriggers += 1
         for _ in range(1 + retriggers):
             # A Stone card has no rank, so it adds no rank chips here; its flat +50
-            # comes from the mod fold below (and is skipped when debuffed).
+            # comes from the mod fold below.
             if not is_stone(card):
                 ctx.chips += rank_chip_value(card.rank)
             for eff, js in providers:
                 _apply(ctx, eff.on_score(ctx, card, i, js))
-            if not skip_mods:
-                _score_card_mods(ctx, card, skip_enhancement=consume)
+            _score_card_mods(ctx, card, skip_enhancement=consume)
 
     # 2) held-in-hand cards
     for card in held:
