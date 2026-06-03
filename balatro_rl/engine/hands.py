@@ -46,6 +46,36 @@ HAND_BASE: dict[HandType, tuple[int, int]] = {
     HandType.FLUSH_FIVE: (160, 16),
 }
 
+# Chips & Mult added PER LEVEL above 1 (Planet card upgrades). Verified against
+# balatrowiki.org/w/Planet_Cards. A hand at level L scores HAND_BASE + INC*(L-1).
+HAND_LEVEL_INC: dict[HandType, tuple[int, int]] = {
+    HandType.HIGH_CARD: (10, 1),
+    HandType.PAIR: (15, 1),
+    HandType.TWO_PAIR: (20, 1),
+    HandType.THREE_OF_A_KIND: (20, 2),
+    HandType.STRAIGHT: (30, 3),
+    HandType.FLUSH: (15, 2),
+    HandType.FULL_HOUSE: (25, 2),
+    HandType.FOUR_OF_A_KIND: (30, 3),
+    HandType.STRAIGHT_FLUSH: (40, 4),
+    HandType.FIVE_OF_A_KIND: (35, 3),
+    HandType.FLUSH_HOUSE: (40, 4),
+    HandType.FLUSH_FIVE: (50, 3),
+}
+
+
+def leveled_base(hand_type: HandType, levels: tuple = ()) -> tuple[int, int]:
+    """Base (chips, mult) for a hand at its current level. `levels` is the 12-tuple of
+    per-HandType levels (HandType order); missing/empty reads as level 1, so callers that
+    don't track levels get the unchanged HAND_BASE (byte-identical)."""
+    base_c, base_m = HAND_BASE[hand_type]
+    ht = int(hand_type)
+    lvl = levels[ht] if ht < len(levels) else 1
+    if lvl <= 1:
+        return base_c, base_m
+    inc_c, inc_m = HAND_LEVEL_INC[hand_type]
+    return base_c + inc_c * (lvl - 1), base_m + inc_m * (lvl - 1)
+
 
 def _is_straight(ranks: list[int]) -> bool:
     u = sorted(set(ranks))

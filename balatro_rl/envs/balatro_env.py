@@ -13,9 +13,11 @@ from .rewards import make_reward
 
 
 class BalatroEnv:
-    def __init__(self, reward_name: str = "shaped", req_scale: float = 1.0):
+    def __init__(self, reward_name: str = "shaped", req_scale: float = 1.0,
+                 enable_bosses: bool = False):
         self._reward = make_reward(reward_name)
         self._req_scale = req_scale
+        self._enable_bosses = enable_bosses   # boss blinds on the boss slot (Phase D retrain)
         self.state = None
 
     def set_req_scale(self, scale: float):
@@ -23,7 +25,7 @@ class BalatroEnv:
         self._req_scale = scale
 
     def reset(self, seed: int = 0):
-        self.state = engine.reset(seed, self._req_scale)
+        self.state = engine.reset(seed, self._req_scale, enable_bosses=self._enable_bosses)
         self._reward.reset()
         return encode(self.state), legal_mask(self.state)
 

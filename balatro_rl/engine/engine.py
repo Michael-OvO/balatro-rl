@@ -22,6 +22,7 @@ from .bosses import (
     select_boss,
 )
 from .cards import Enhancement, standard_deck
+from .consumables import apply_consumable
 from .economy import blind_reward, interest, MONEY_PER_UNUSED_HAND
 from .hands import evaluate
 from .jokers.base import HandEvents, NO_RULES, REGISTRY, aggregate_rules
@@ -48,6 +49,7 @@ class Verb(IntEnum):
     REROLL = 4
     REORDER = 5
     LEAVE_SHOP = 6
+    USE = 7        # use a consumable (payload = consumable index); a free action, any phase
 
 
 def _draw(hand: list, deck: list, hand_size: int) -> tuple[list, list]:
@@ -129,10 +131,13 @@ def reset(seed: int, scale: float = 1.0, card_mods=None,
 def legal_actions(state: GameState) -> list[tuple[Verb, tuple[int, ...]]]:
     if state.done:
         return []
+    # Consumables can be USEd in any phase (a free action). Empty by default -> no USE
+    # actions, so the action space is byte-identical until consumables are acquired.
+    use = [(Verb.USE, i) for i in range(len(state.consumables))]
     if state.phase == Phase.SHOP:
         if state.shop_steps >= SHOP_ACTION_CAP:
             return [(Verb.LEAVE_SHOP, 0)]          # bound shop dithering -> force progress
-        actions = [(Verb.LEAVE_SHOP, 0)]
+        actions = use + [(Verb.LEAVE_SHOP, 0)]
         for i, offer in enumerate(state.shop_offers):
             if state.money >= joker_cost(offer.type) and len(state.jokers) < JOKER_SLOTS:
                 actions.append((Verb.BUY, i))
@@ -146,7 +151,7 @@ def legal_actions(state: GameState) -> list[tuple[Verb, tuple[int, ...]]]:
                 if i != j:
                     actions.append((Verb.REORDER, (i, j)))
         return actions
-    actions: list[tuple[Verb, tuple[int, ...]]] = []
+    actions: list[tuple[Verb, tuple[int, ...]]] = list(use)
     n = len(state.hand)
     # Boss PLAY restrictions (Psychic exactly-5 / Eye no-repeat / Mouth single-type). Only
     # engaged on those boss blinds; off them `play_filter` is False and the loop is the
@@ -235,8 +240,22 @@ def _enter_cashout_or_win(state: GameState, info: dict):
     return shop, {**info, "cleared": True, "result": "shop", "earned": money - state.money}
 
 
+def _use_consumable(state: GameState, ci: int) -> tuple[GameState, dict]:
+    """Apply the consumable at index `ci` and remove it. A free action (doesn't end the
+    turn or touch hands/discards) usable in any phase. Planets level a hand type; other
+    kinds arrive in later sub-phases."""
+    assert 0 <= ci < len(state.consumables), "no such consumable"
+    con = state.consumables[ci]
+    overrides = apply_consumable(state, con)
+    remaining = state.consumables[:ci] + state.consumables[ci + 1:]
+    nxt = dataclasses.replace(state, consumables=remaining, **overrides)
+    return nxt, {"verb": "use", "kind": con.kind, "type_id": con.type_id}
+
+
 def step(state: GameState, action: tuple[Verb, tuple[int, ...]]) -> tuple[GameState, dict]:
     assert not state.done, "step() called on a terminal state"
+    if action[0] == Verb.USE:        # consumables are usable in any phase (free action)
+        return _use_consumable(state, action[1])
     if state.phase == Phase.SHOP:
         return _shop_step(state, action)
     verb, idx = action
@@ -284,7 +303,8 @@ def step(state: GameState, action: tuple[Verb, tuple[int, ...]]) -> tuple[GameSt
                      hand_plays_run=state.hand_plays_run,
                      hand_plays_round=state.hand_plays_round,
                      deck_enh_counts=_deck_enh_histogram(state.master_deck),
-                     debuffed_idx=debuffed, flint=boss_halves_base(boss), rng=state.rng)
+                     debuffed_idx=debuffed, levels=state.levels,
+                     flint=boss_halves_base(boss), rng=state.rng)
     # Probabilistic scoring jokers (Misprint, Bloodstone) consumed state.rng; the
     # advanced rng rides back on res.rng and MUST be written into every successor
     # state below so a fixed seed reproduces the same rolls deterministically.

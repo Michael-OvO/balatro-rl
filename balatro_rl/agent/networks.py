@@ -23,6 +23,7 @@ import numpy as np
 from flax.linen.initializers import orthogonal
 
 from ..envs.actions import _PAIRS, _SUBSETS
+from ..envs.obs import CONSUM_VOCAB
 from .value_head import NBINS
 
 JOKER_VOCAB = 200   # >= max JokerType id (123) + buffer; id 0 = empty/pad slot. Shared by jokers+shop.
@@ -63,7 +64,7 @@ class ActorCritic(nn.Module):
         d = self.d_model
 
         # ---- per-card tokens: [B,8,17] one-hots -> [B,8,d], + learned pos + card segment ----
-        seg = self.param("seg", nn.initializers.normal(0.02), (3, d))   # card / joker / shop tags
+        seg = self.param("seg", nn.initializers.normal(0.02), (4, d))   # card / joker / shop / consumable tags
         pos = self.param("pos", nn.initializers.normal(0.02), (8, d))   # hand-slot positions
         x = nn.Dense(d)(obs["hand"]) + pos[None] + seg[0]               # [B,8,d]
 
@@ -84,12 +85,16 @@ class ActorCritic(nn.Module):
         embed = nn.Embed(JOKER_VOCAB, d)
         je = embed(obs["joker_types"]) + nn.Dense(d)(obs["joker_counter"][..., None]) + seg[1]  # [B,5,d]
         se = embed(obs["shop_types"]) + nn.Dense(d)(obs["shop_cost"][..., None]) + seg[2]       # [B,2,d]
+        ce = nn.Embed(CONSUM_VOCAB, d)(obs["consum_types"]) + seg[3]   # [B,MAX_CONSUM,d] consumables
         joker_ctx = _masked_pool(je, obs["joker_mask"])               # [B,2d]
         shop_ctx = _masked_pool(se, obs["shop_mask"])                 # [B,2d]
-        g = jnp.concatenate([obs["global"], obs["levels"],
-                             obs["deck_rank_hist"], obs["deck_suit_hist"]], axis=-1)  # [B,45]
+        consum_ctx = _masked_pool(ce, obs["consum_mask"])             # [B,2d]
+        # boss one-hot rides in the global block; off a boss blind it is the NONE one-hot.
+        g = jnp.concatenate([obs["global"], obs["boss_onehot"], obs["levels"],
+                             obs["deck_rank_hist"], obs["deck_suit_hist"]], axis=-1)
         g = nn.gelu(nn.Dense(d)(g))                                   # [B,d]
-        ctx = nn.gelu(nn.Dense(d)(jnp.concatenate([joker_ctx, shop_ctx, g], axis=-1)))  # [B,d]
+        ctx = nn.gelu(nn.Dense(d)(jnp.concatenate(
+            [joker_ctx, shop_ctx, consum_ctx, g], axis=-1)))         # [B,d]
 
         # ---- FiLM-condition the card stream on ctx (keeps the 8-slot gather indices stable) ----
         gamma, beta = jnp.split(nn.Dense(2 * d)(ctx), 2, axis=-1)
@@ -124,8 +129,12 @@ class ActorCritic(nn.Module):
         leave = nn.Dense(1)(nn.gelu(nn.Dense(d)(ctx)))                                        # [B,1]
         shop_logits = jnp.concatenate([buy, sell, reroll, reorder, leave], axis=-1)          # [B,29]
 
+        # ---- USE head (MAX_CONSUM): score each consumable slot from its embed + ctx ----
+        ctx_bc = jnp.broadcast_to(ctx[:, None, :], ce.shape)        # [B,MAX_CONSUM,d]
+        use = nn.Dense(1)(nn.gelu(nn.Dense(d)(jnp.concatenate([ce, ctx_bc], -1))))[..., 0]    # [B,MAX_CONSUM]
+
         # ---- assembly + mask + value (the load-bearing order: matches actions.py index-for-index) ----
-        logits = jnp.concatenate([play_logits, disc_logits, shop_logits], axis=-1)           # [B,465]
+        logits = jnp.concatenate([play_logits, disc_logits, shop_logits, use], axis=-1)       # [B,467]
         logits = jnp.where(action_mask, logits, jnp.finfo(logits.dtype).min)                 # identical to old net
         value_logits = nn.Dense(self.n_bins, kernel_init=orthogonal(1.0))(
             nn.gelu(nn.Dense(d)(ctx)))                                                        # distributional head on ctx

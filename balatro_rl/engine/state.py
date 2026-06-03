@@ -59,3 +59,8 @@ class GameState:
     # the default game is byte-identical (the agent stays boss-blind until the retrain).
     boss: int = 0
     bosses_enabled: bool = False
+    # Owned consumables (Tarot/Planet/Spectral) and the slot cap. Applied via the USE
+    # action (engine.step). Empty by default -> no consumables, byte-identical. The agent
+    # can't see or USE them until the Phase D obs/action widening.
+    consumables: tuple = ()      # tuple[Consumable, ...]
+    consumable_slots: int = 2
