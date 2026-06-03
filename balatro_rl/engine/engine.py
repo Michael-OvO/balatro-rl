@@ -163,7 +163,10 @@ def step(state: GameState, action: tuple[Verb, tuple[int, ...]]) -> tuple[GameSt
     # PLAY
     assert state.hands_left > 0, "no hands left"
     held = remaining  # cards still in hand (not played) score in the held phase
-    res = score_play(selected, jokers=state.jokers, held=tuple(held))
+    res = score_play(selected, jokers=state.jokers, held=tuple(held),
+                     joker_slots=JOKER_SLOTS, money=state.money,
+                     hands_left=state.hands_left, discards_left=state.discards_left,
+                     deck_count=len(state.deck))
     # Lifecycle: let scaling jokers (e.g. Ride the Bus) update from this hand.
     rules = aggregate_rules(state.jokers) if state.jokers else None
     if state.jokers:

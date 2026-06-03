@@ -47,6 +47,17 @@ class JokerType(IntEnum):
     WALKIE_TALKIE = 101
     SMILEY_FACE = 104
     SOCK_AND_BUSKIN = 109
+    # --- Batch 2: state-reading jokers ---
+    JOKER_STENCIL = 17
+    BANNER = 22
+    MYSTIC_SUMMIT = 23
+    ABSTRACT_JOKER = 34
+    BLUE_JOKER = 53
+    SQUARE_JOKER = 65
+    BULL = 93
+    POPCORN = 97
+    SPARE_TROUSERS = 98
+    WEE_JOKER = 124
 
 
 class Rarity(IntEnum):
@@ -91,7 +102,13 @@ class JokerState:
 
 @dataclasses.dataclass(slots=True)
 class ScoreContext:
-    """Mutable scratch used only during one hand's scoring (never stored in state)."""
+    """Mutable scratch used only during one hand's scoring (never stored in state).
+
+    The trailing fields expose read-only game-state info to scoring jokers
+    (Abstract Joker, Joker Stencil, Bull, Banner, Mystic Summit, Blue Joker...).
+    They are populated in scoring.score_play from the owning GameState; they
+    default sensibly so contexts built without state still construct.
+    """
     chips: int = 0
     mult: float = 0.0
     played: list = dataclasses.field(default_factory=list)
@@ -101,6 +118,13 @@ class ScoreContext:
     rules: RuleFlags = NO_RULES
     first_face_idx: int | None = None
     contains: frozenset = frozenset()
+    # --- read-only game-state info (for state-reading jokers) ---
+    n_jokers: int = 0           # number of owned jokers
+    empty_joker_slots: int = 0  # JOKER_SLOTS - n_jokers
+    money: int = 0             # current money ($)
+    hands_left: int = 0         # hands remaining this blind
+    discards_left: int = 0      # discards remaining this blind
+    deck_count: int = 0         # cards left in the draw pile
 
 
 class JokerEffect:

@@ -333,3 +333,98 @@ class _IceCream(JokerEffect):  # wiki: /w/Ice_Cream  — +100 Chips, -5 per hand
         return Effect(chips=max(0, 100 - 5 * int(js.counter)))
     def on_play(self, state, played, scoring_idx, rules, js):
         return dataclasses.replace(js, counter=js.counter + 1.0)
+
+
+# --- Batch 2: state-reading jokers (read ScoreContext game-state fields) ---
+
+@register(JokerType.ABSTRACT_JOKER)
+class _AbstractJoker(JokerEffect):  # wiki: /w/Abstract_Joker  — +3 Mult per owned joker (incl. itself)
+    rarity = Rarity.COMMON
+    cost = 4
+    def independent(self, ctx, js):
+        return Effect(mult=3 * ctx.n_jokers)
+
+
+@register(JokerType.JOKER_STENCIL)
+class _JokerStencil(JokerEffect):  # wiki: /w/Joker_Stencil  — X1 Mult per empty slot, own slot counts as empty
+    rarity = Rarity.UNCOMMON
+    cost = 8
+    def independent(self, ctx, js):
+        return Effect(xmult=float(ctx.empty_joker_slots + 1))
+
+
+@register(JokerType.BULL)
+class _Bull(JokerEffect):  # wiki: /w/Bull  — +2 Chips per $1 held (no bonus at $0 or less)
+    rarity = Rarity.UNCOMMON
+    cost = 6
+    def independent(self, ctx, js):
+        return Effect(chips=2 * max(0, ctx.money))
+
+
+@register(JokerType.BANNER)
+class _Banner(JokerEffect):  # wiki: /w/Banner  — +30 Chips per remaining discard
+    rarity = Rarity.COMMON
+    cost = 5
+    def independent(self, ctx, js):
+        return Effect(chips=30 * ctx.discards_left)
+
+
+@register(JokerType.MYSTIC_SUMMIT)
+class _MysticSummit(JokerEffect):  # wiki: /w/Mystic_Summit  — +15 Mult when 0 discards remaining
+    rarity = Rarity.COMMON
+    cost = 5
+    def independent(self, ctx, js):
+        return Effect(mult=15) if ctx.discards_left == 0 else Effect()
+
+
+@register(JokerType.BLUE_JOKER)
+class _BlueJoker(JokerEffect):  # wiki: /w/Blue_Joker  — +2 Chips per remaining card in deck
+    rarity = Rarity.COMMON
+    cost = 5
+    def independent(self, ctx, js):
+        return Effect(chips=2 * ctx.deck_count)
+
+
+# --- Batch 2: scaling state-reading jokers ---
+
+@register(JokerType.SQUARE_JOKER)
+class _SquareJoker(JokerEffect):  # wiki: /w/Square_Joker  — +4 Chips if played hand has exactly 4 cards (start 0)
+    rarity = Rarity.COMMON
+    cost = 4
+    def independent(self, ctx, js):
+        return Effect(chips=int(js.counter))
+    def on_play(self, state, played, scoring_idx, rules, js):
+        bump = 4.0 if len(played) == 4 else 0.0
+        return dataclasses.replace(js, counter=js.counter + bump)
+
+
+@register(JokerType.SPARE_TROUSERS)
+class _SpareTrousers(JokerEffect):  # wiki: /w/Spare_Trousers  — +2 Mult if played hand contains Two Pair (start 0)
+    rarity = Rarity.UNCOMMON
+    cost = 6
+    def independent(self, ctx, js):
+        return Effect(mult=js.counter)
+    def on_play(self, state, played, scoring_idx, rules, js):
+        bump = 2.0 if HandType.TWO_PAIR in contains(list(played)) else 0.0
+        return dataclasses.replace(js, counter=js.counter + bump)
+
+
+@register(JokerType.WEE_JOKER)
+class _WeeJoker(JokerEffect):  # wiki: /w/Wee_Joker  — +8 Chips per scored 2 (start 0)
+    rarity = Rarity.RARE
+    cost = 8
+    def independent(self, ctx, js):
+        return Effect(chips=int(js.counter))
+    def on_play(self, state, played, scoring_idx, rules, js):
+        twos = sum(1 for i in scoring_idx if played[i].rank == 2)
+        return dataclasses.replace(js, counter=js.counter + 8.0 * twos)
+
+
+@register(JokerType.POPCORN)
+class _Popcorn(JokerEffect):  # wiki: /w/Popcorn  — +20 Mult, -4 Mult per round played (counter = rounds passed)
+    rarity = Rarity.COMMON
+    cost = 5
+    def independent(self, ctx, js):
+        return Effect(mult=max(0.0, 20.0 - 4.0 * js.counter))
+    def on_round_end(self, state, js, rng):
+        return dataclasses.replace(js, counter=js.counter + 1.0), 0, False, rng
