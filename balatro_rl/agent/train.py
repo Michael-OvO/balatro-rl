@@ -41,6 +41,7 @@ class TrainConfig:
     ent_coef: typing.Union[float, typing.Callable[[int], float]] = 0.01
     reward_name: str = "shaped"
     seed: int = 0
+    enable_bosses: bool = False     # boss blinds in the training env (Phase D retrain)
     eval_interval: int = 0          # run greedy eval every N updates (0 = off)
     eval_seeds: tuple = (0, 1, 2, 3)
     # Curriculum: shrink the blind target so the agent experiences clearing, then ramp to 1.0.
@@ -144,7 +145,7 @@ def train(cfg: TrainConfig, logger=None) -> TrainResult:
     _open_loop = callable(cfg.req_scale_schedule)
     cur_scale = float(cfg.req_scale_schedule(0)) if _open_loop else float(cfg.curr_floor)
     venv = SyncVectorEnv(cfg.num_envs, cfg.reward_name, base_seed=cfg.seed + 1000,
-                         req_scale=cur_scale)
+                         req_scale=cur_scale, enable_bosses=cfg.enable_bosses)
     next_obs, next_mask = venv.reset()
     T, N = cfg.num_steps, cfg.num_envs
     assert (T * N) % cfg.num_minibatches == 0, (
