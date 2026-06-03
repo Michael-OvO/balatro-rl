@@ -180,6 +180,47 @@ def boss_allows_play(boss: BossEffect, combo_cards, hand_plays_round, rules) -> 
     return True
 
 
+# --- draw/state effects (Phase C3) -----------------------------------------------
+
+def boss_tooth_cost(boss: BossEffect, n_played: int) -> int:
+    """Money lost this PLAY: The Tooth charges $1 per card played (money may go negative)."""
+    return n_played if boss == BossEffect.THE_TOOTH else 0
+
+
+def boss_ox_zeroes_money(boss: BossEffect, played_ht: int, hand_plays_run) -> bool:
+    """The Ox sets money to $0 when you play your most-played hand type. Uses the run play
+    history (pre-increment of this hand); triggers if the played type is (tied for) the max
+    and has actually been played. Approximation of the wiki's ante-entry snapshot (negligible
+    while the agent is boss-blind; refine at the retrain if it matters)."""
+    if boss != BossEffect.THE_OX or not hand_plays_run:
+        return False
+    top = max(hand_plays_run)
+    played = hand_plays_run[played_ht] if played_ht < len(hand_plays_run) else 0
+    return top > 0 and played == top
+
+
+def boss_draw_target(boss: BossEffect, remaining_len: int, hand_size: int) -> int:
+    """Target hand size for the post-action redraw. The Serpent draws exactly 3 (capped at
+    hand_size so the agent's fixed 8-slot encoding stays valid); every other boss refills to
+    hand_size as usual."""
+    if boss == BossEffect.THE_SERPENT:
+        return min(hand_size, remaining_len + 3)
+    return hand_size
+
+
+def boss_hook_discard(remaining, rng, k: int = 2):
+    """The Hook: remove k random cards from the held `remaining` cards (before the redraw),
+    preserving the order of the survivors. Returns (kept_list, rng). Discards all if fewer
+    than k are held. Draws one rng value (an index shuffle) so a fixed seed is deterministic."""
+    remaining = list(remaining)
+    n = len(remaining)
+    if n <= k:
+        return [], rng
+    order, rng = rng.shuffle(list(range(n)))
+    removed = set(order[:k])
+    return [c for j, c in enumerate(remaining) if j not in removed], rng
+
+
 def select_boss(rng, ante: int):
     """Pick a boss uniformly from the ante's eligible pool. Returns (BossEffect, rng).
     Draws exactly one rng value (the only perturbation of the deterministic stream), so a

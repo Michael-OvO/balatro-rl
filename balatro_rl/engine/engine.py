@@ -17,7 +17,8 @@ from enum import IntEnum
 from .blinds import required_score
 from .bosses import (
     BossEffect, boss_allows_play, boss_debuffed_idx, boss_discards_left,
-    boss_filters_plays, boss_halves_base, boss_hand_size_delta, boss_hands_left,
+    boss_draw_target, boss_filters_plays, boss_halves_base, boss_hand_size_delta,
+    boss_hands_left, boss_hook_discard, boss_ox_zeroes_money, boss_tooth_cost,
     select_boss,
 )
 from .cards import Enhancement, standard_deck
@@ -249,7 +250,9 @@ def step(state: GameState, action: tuple[Verb, tuple[int, ...]]) -> tuple[GameSt
 
     if verb == Verb.DISCARD:
         assert state.discards_left > 0, "no discards left"
-        hand, deck = _draw(remaining, list(state.deck), state.hand_size)
+        # The Serpent draws exactly 3 after a discard (else refill to hand size).
+        target = boss_draw_target(BossEffect(state.boss), len(remaining), state.hand_size)
+        hand, deck = _draw(remaining, list(state.deck), target)
         # Lifecycle: fold every joker's on_discard (mirrors _cash_out / on_round_end):
         # thread rng, accumulate money, persist scaling counters, drop self-consumers.
         money = state.money
@@ -294,6 +297,12 @@ def step(state: GameState, action: tuple[Verb, tuple[int, ...]]) -> tuple[GameSt
     # Both are always 0 / empty for the current game (no hook produces them), so
     # this block is a behavioral no-op until Phase B populates them.
     money = state.money + res.money_delta
+    # Boss money effects (Phase C3): The Tooth charges $1 per card played (money may go
+    # negative); The Ox zeroes money when you play your most-played run hand type. Both
+    # no-ops off their blinds. Ox overrides (sets exactly $0) regardless of other deltas.
+    money -= boss_tooth_cost(boss, len(selected))
+    if boss_ox_zeroes_money(boss, int(res.hand_type), state.hand_plays_run):
+        money = 0
     master_deck = state.master_deck
     if res.destroyed_idx:
         destroyed = {id(selected[i]) for i in res.destroyed_idx}
@@ -341,7 +350,13 @@ def step(state: GameState, action: tuple[Verb, tuple[int, ...]]) -> tuple[GameSt
                                       hand_plays_run=plays_run, hand_plays_round=plays_round)
         return _enter_cashout_or_win(carried, info)
 
-    hand, deck = _draw(remaining, list(state.deck), state.hand_size)
+    # Boss draw effects (Phase C3): The Hook discards 2 random held cards before the redraw
+    # (advancing rng -> threaded into the successor); The Serpent draws only 3. No-ops off
+    # their blinds -> the default refill to hand_size is byte-identical.
+    if boss == BossEffect.THE_HOOK:
+        remaining, rng = boss_hook_discard(remaining, rng, 2)
+    target = boss_draw_target(boss, len(remaining), state.hand_size)
+    hand, deck = _draw(remaining, list(state.deck), target)
     if hands_left <= 0:
         lost = dataclasses.replace(state, hand=tuple(hand), deck=tuple(deck),
                                    round_score=round_score, hands_left=0,
