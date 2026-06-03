@@ -392,10 +392,22 @@ def _run_cell(chips, mult):
 
 
 def _trace_delta(prev, cur):
-    """Human delta between two trace rows -> (text, css class). Detects added chips,
-    added mult, or a multiplicative mult bump (X2 mult etc.)."""
+    """Human delta between two trace rows -> (text, css class). Prefers the EXPLICIT delta
+    the scoring recorded (dc/dm/xm) so additive +Mult is never mistaken for xMult; falls back
+    to inferring from running totals for synthetic/legacy rows that lack explicit deltas."""
     if prev is None:
         return "base hand", "none"
+    if any(k in cur for k in ("dc", "dm", "xm")):     # explicit (real episode) -> definitive
+        xm, dc, dm = cur.get("xm", 1) or 1, cur.get("dc", 0) or 0, cur.get("dm", 0) or 0
+        if xm not in (1, 1.0):
+            return f"&times;{xm:g} mult", "xmlt"
+        if dc and dm:
+            return f"{dc:+g} chips &middot; {dm:+g} mult", "chip"
+        if dc:
+            return f"{dc:+g} chips", "chip"
+        if dm:
+            return f"{dm:+g} mult", "mlt"
+        return "&mdash;", "none"
     dc = cur["chips"] - prev["chips"]
     dm = cur["mult"] - prev["mult"]
     if dc and not dm:
@@ -425,7 +437,7 @@ def _score_trace_html(step):
     prev = None
     for k, entry in enumerate(trace):
         chips, mult = entry.get("chips", 0), entry.get("mult", 0)
-        cur = {"chips": chips, "mult": mult}
+        cur = entry              # carries chips/mult + explicit dc/dm/xm deltas when recorded
         dtxt, dcls = _trace_delta(prev, cur)
         base = " base" if k == 0 else ""
         rows.append(f'<div class="trace-row{base}">'
