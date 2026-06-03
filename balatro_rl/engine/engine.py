@@ -15,6 +15,7 @@ import itertools
 from enum import IntEnum
 
 from .blinds import required_score
+from .bosses import BossEffect, select_boss
 from .cards import Enhancement, standard_deck
 from .economy import blind_reward, interest, MONEY_PER_UNUSED_HAND
 from .hands import evaluate
@@ -92,7 +93,8 @@ def _deck_enh_histogram(master_deck) -> tuple:
     return tuple(counts)
 
 
-def reset(seed: int, scale: float = 1.0, card_mods=None) -> GameState:
+def reset(seed: int, scale: float = 1.0, card_mods=None,
+          enable_bosses: bool = False) -> GameState:
     rng = RNG.from_seed(seed)
     # The persistent master deck (cards + their mod fields) is the canonical
     # owned-card set. We shuffle the WORKING deck FROM a copy of it. With an
@@ -115,7 +117,7 @@ def reset(seed: int, scale: float = 1.0, card_mods=None) -> GameState:
         money=STARTING_MONEY,
         rng=rng, phase=Phase.PLAYING, done=False, won=False, jokers=jokers,
         shop_offers=(), rerolls_done=0, req_scale=scale,
-        master_deck=master_deck,
+        master_deck=master_deck, boss=0, bosses_enabled=enable_bosses,
     )
 
 
@@ -163,11 +165,19 @@ def _advance_blind(state: GameState):
     # Start-of-blind fold: re-roll per-round joker targets (Ancient Joker, The Idol,
     # Mail-In Rebate), threading the rng so each round's pick is seed-deterministic.
     jokers, rng = _start_round(state, state.jokers, rng)
+    # Boss selection: only on the boss blind AND only when enabled. Disabled -> NONE and
+    # ZERO rng drawn here, so the deterministic stream (and every existing replay) is
+    # untouched. The boss's score-requirement multiplier (Wall 4x / Needle 1x / ...) feeds
+    # required_score; its other effects arrive in later sub-phases.
+    boss = BossEffect.NONE
+    if new_blind == 2 and state.bosses_enabled:
+        boss, rng = select_boss(rng, new_ante)
     nxt = dataclasses.replace(
         state, ante=new_ante, blind_index=new_blind, deck=tuple(deck), hand=tuple(hand),
-        round_score=0, required=required_score(new_ante, new_blind, state.req_scale),
+        round_score=0, required=required_score(new_ante, new_blind, state.req_scale, boss),
         hands_left=HANDS_PER_BLIND, discards_left=DISCARDS_PER_BLIND, rng=rng,
         hand_plays_round=tuple([0] * 12),  # per-round counter resets each blind
+        boss=int(boss),
         jokers=jokers, phase=Phase.PLAYING, shop_offers=(), rerolls_done=0, shop_steps=0)
     return nxt, {"verb": "leave_shop", "result": "next_blind",
                  "ante": new_ante, "blind": new_blind}

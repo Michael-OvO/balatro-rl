@@ -53,3 +53,9 @@ class GameState:
     # back-compat with directly-constructed states; reset() seeds it from
     # standard_deck(). Card destruction (Glass) drops entries from here.
     master_deck: tuple[Card, ...] = ()
+    # Active boss on the current blind (BossEffect int; 0 = NONE / no boss). Set by
+    # _advance_blind when entering the boss blind with bosses enabled; 0 on small/big
+    # blinds and whenever bosses are disabled. `bosses_enabled` gates boss selection so
+    # the default game is byte-identical (the agent stays boss-blind until the retrain).
+    boss: int = 0
+    bosses_enabled: bool = False
