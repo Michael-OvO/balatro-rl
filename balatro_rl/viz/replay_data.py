@@ -15,13 +15,29 @@ from ..engine import engine
 from ..engine.cards import card_str
 from ..engine.engine import Verb
 from ..engine.jokers.base import JokerType
-from ..engine.shop import joker_cost
+from ..engine.shop import joker_cost, sell_value
 from ..engine.state import GameState, Phase
 from ..envs.actions import decode
 from ..envs.balatro_env import BalatroEnv
 
 _PHASE = {0: "PLAYING", 1: "WON", 2: "LOST", 3: "SHOP"}
 _MAX_STEPS = 3000
+
+
+def _card_d(c) -> dict:
+    """Serialize a Card for the viewer (enh/ed/seal are 0 today; future-proofs Tier-2)."""
+    return {"rank": c.rank, "suit": c.suit,
+            "enh": c.enhancement, "ed": c.edition, "seal": c.seal}
+
+
+def _joker_d(j) -> dict:
+    return {"type": int(j.type), "name": JokerType(j.type).name,
+            "counter": float(j.counter), "edition": int(j.edition),
+            "sell": sell_value(j.type, j.sell_bonus)}
+
+
+def _offer_d(o) -> dict:
+    return {"type": int(o.type), "name": JokerType(o.type).name, "cost": joker_cost(o.type)}
 
 
 def action_label(action_id: int) -> str:
@@ -95,7 +111,9 @@ def record_agent_episode(net, params, seed: int, reward_name: str = "shaped",
         legal = np.flatnonzero(np.asarray(mask))
         order = legal[np.argsort(probs[legal])[::-1][:topk]]
         top = [[action_label(int(i)), float(probs[i])] for i in order]
-        board = render_board(state)
+        verb, arg = decode(a)
+        selected = list(arg) if verb in (Verb.PLAY, Verb.DISCARD) else []
+        board = render_board(state)            # text blob kept for old-style fallback
         obs, reward, done, info, mask = env.step(a)
         steps.append({
             "t": len(steps), "ante": int(state.ante), "blind": int(state.blind_index),
@@ -105,6 +123,36 @@ def record_agent_episode(net, params, seed: int, reward_name: str = "shaped",
             "score": info.get("score"), "hand_type": info.get("hand_type"),
             "chips": info.get("chips"), "mult": info.get("mult"),
             "top_probs": top,
+            # --- structured fields (schema v2) for the card-diff viewer ---
+            "schema": 2,
+            "verb": verb.name,
+            "selected": selected,
+            "hand": [_card_d(c) for c in state.hand],     # BEFORE-action hand snapshot
+            "scoring_idx": list(info.get("scoring_idx", [])),
+            "round_score": int(state.round_score),
+            "required": int(state.required),
+            "hands_left": int(state.hands_left),
+            "discards_left": int(state.discards_left),
+            "jokers": [_joker_d(j) for j in state.jokers],
+            "shop_offers": ([_offer_d(o) for o in state.shop_offers]
+                            if int(state.phase) == int(Phase.SHOP) else []),
+            "hand_reset": bool(verb == Verb.LEAVE_SHOP),
+            "earned": info.get("earned"),
+        })
+    if env.state.done:        # explicit terminal frame so the viewer ENDS on the outcome
+        st = env.state        # (otherwise the last frame is the pre-action state, e.g. "hands 1")
+        steps.append({
+            "t": len(steps), "ante": int(st.ante), "blind": int(st.blind_index),
+            "phase": _PHASE.get(int(st.phase)), "money": int(st.money),
+            "board": render_board(st), "action_id": None,
+            "action_label": "WON" if st.won else "LOST", "reward": 0.0, "value": 0.0,
+            "score": None, "hand_type": None, "chips": None, "mult": None, "top_probs": [],
+            "schema": 2, "verb": "TERMINAL", "selected": [],
+            "hand": [_card_d(c) for c in st.hand], "scoring_idx": [],
+            "round_score": int(st.round_score), "required": int(st.required),
+            "hands_left": int(st.hands_left), "discards_left": int(st.discards_left),
+            "jokers": [_joker_d(j) for j in st.jokers], "shop_offers": [],
+            "hand_reset": False, "earned": None,
         })
     return steps
 

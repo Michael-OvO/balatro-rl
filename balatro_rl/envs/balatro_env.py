@@ -13,12 +13,17 @@ from .rewards import make_reward
 
 
 class BalatroEnv:
-    def __init__(self, reward_name: str = "shaped"):
+    def __init__(self, reward_name: str = "shaped", req_scale: float = 1.0):
         self._reward = make_reward(reward_name)
+        self._req_scale = req_scale
         self.state = None
 
+    def set_req_scale(self, scale: float):
+        """Curriculum target scale; applied at the NEXT reset (in-progress episode keeps its)."""
+        self._req_scale = scale
+
     def reset(self, seed: int = 0):
-        self.state = engine.reset(seed)
+        self.state = engine.reset(seed, self._req_scale)
         self._reward.reset()
         return encode(self.state), legal_mask(self.state)
 

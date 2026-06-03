@@ -14,5 +14,7 @@ ANTE_BASE: dict[int, int] = {
 BLIND_MULT: tuple[float, float, float] = (1.0, 1.5, 2.0)  # small, big, boss
 
 
-def required_score(ante: int, blind_index: int) -> int:
-    return int(ANTE_BASE[ante] * BLIND_MULT[blind_index])
+def required_score(ante: int, blind_index: int, scale: float = 1.0) -> int:
+    """Score to clear a blind. `scale` (curriculum) shrinks the target; default 1.0 is
+    the real game. Floored at 1 so a low scale never yields a 0-chip (auto-clear) blind."""
+    return max(1, int(round(ANTE_BASE[ante] * BLIND_MULT[blind_index] * scale)))

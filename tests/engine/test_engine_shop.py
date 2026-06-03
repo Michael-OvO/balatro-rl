@@ -91,3 +91,20 @@ def test_legal_actions_in_shop():
     assert Verb.LEAVE_SHOP in verbs
     assert Verb.BUY in verbs     # affordable offers exist
     assert Verb.REROLL in verbs
+
+
+def test_shop_action_cap_forces_leave():
+    """REORDER is a free no-op; without a bound the greedy agent loops it forever
+    (env never returns done). The per-visit cap forces LEAVE_SHOP -> progress."""
+    from balatro_rl.engine.engine import SHOP_ACTION_CAP
+    s = _clearable(money=10, hands_left=1,
+                   jokers=(JokerState(JokerType.JOKER), JokerState(JokerType.BARON)))
+    cur, _ = step(s, (Verb.PLAY, (0, 1, 2, 3)))      # clear -> shop
+    assert cur.phase == Phase.SHOP and cur.shop_steps == 0
+    for _ in range(SHOP_ACTION_CAP):
+        assert Verb.REORDER in {a[0] for a in legal_actions(cur)}   # still allowed below cap
+        cur, _ = step(cur, (Verb.REORDER, (0, 1)))
+    assert cur.shop_steps == SHOP_ACTION_CAP
+    assert legal_actions(cur) == [(Verb.LEAVE_SHOP, 0)]             # loop impossible
+    nxt, _ = step(cur, (Verb.LEAVE_SHOP, 0))
+    assert nxt.phase == Phase.PLAYING and nxt.shop_steps == 0       # fresh blind resets it

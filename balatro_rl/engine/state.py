@@ -39,3 +39,5 @@ class GameState:
     jokers: tuple = ()   # tuple[JokerState, ...]; acquired via the shop
     shop_offers: tuple = ()   # tuple[JokerState, ...] offered in the shop
     rerolls_done: int = 0      # rerolls used in the current shop (for reroll cost)
+    shop_steps: int = 0        # actions taken this shop visit; bounds shop dithering
+    req_scale: float = 1.0     # curriculum: scales the blind score target (1.0 = real game)
