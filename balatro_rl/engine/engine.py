@@ -267,6 +267,13 @@ def step(state: GameState, action: tuple[Verb, tuple[int, ...]]) -> tuple[GameSt
     if res.destroyed_idx:
         destroyed = {id(selected[i]) for i in res.destroyed_idx}
         master_deck = tuple(c for c in master_deck if id(c) not in destroyed)
+    # Persistent enhancement overrides (Vampire strip -> NONE, Midas face -> GOLD), applied
+    # to the surviving master_deck by identity (played cards ARE master_deck objects). Last
+    # write wins if a card is recorded twice. Empty unless Vampire/Midas is owned -> no-op.
+    if res.mutations:
+        mut = {id(selected[i]): enh for i, enh in res.mutations}
+        master_deck = tuple(dataclasses.replace(c, enhancement=int(mut[id(c)]))
+                            if id(c) in mut else c for c in master_deck)
     # Lifecycle: let scaling jokers (e.g. Ride the Bus) update from this hand.
     rules = aggregate_rules(state.jokers) if state.jokers else None
     if state.jokers:
@@ -280,9 +287,10 @@ def step(state: GameState, action: tuple[Verb, tuple[int, ...]]) -> tuple[GameSt
     # Scaling lifecycle from this hand's enhancement EVENTS (Glass shattered / Lucky
     # triggered). Folded AFTER on_play, and only when an event actually fired, so an
     # unmodified hand never touches a joker counter (byte-identical to pre-Batch-8).
-    if new_jokers and (res.destroyed_idx or res.lucky_triggered):
+    if new_jokers and (res.destroyed_idx or res.lucky_triggered or res.vampire_consumed):
         events = HandEvents(glass_destroyed=len(res.destroyed_idx),
-                            lucky_triggered=res.lucky_triggered)
+                            lucky_triggered=res.lucky_triggered,
+                            vampire_consumed=res.vampire_consumed)
         new_jokers = tuple(REGISTRY[js.type].on_hand_events(js, events) for js in new_jokers)
     # Now (AFTER the joker on_play fold, which reads PRE-increment counts off `state`
     # for Obelisk) bump the per-HandType play counters for the hand just played.

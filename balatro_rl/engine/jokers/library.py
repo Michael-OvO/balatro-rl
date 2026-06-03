@@ -800,3 +800,30 @@ class _LuckyCat(JokerEffect):  # wiki: /w/Lucky_Cat  — gains X0.25 Mult per Lu
         return Effect(xmult=1.0 + 0.25 * (js.counter + ctx.lucky_triggers))
     def on_hand_events(self, js, events):
         return dataclasses.replace(js, counter=js.counter + events.lucky_triggered)
+
+
+# --- Batch 9 (B2b-ii): card-mutation enhancement jokers -------------------------
+# Both publish a RuleFlag that score_play reads to record persistent master_deck
+# enhancement overrides (applied by engine.step). Vampire also scales like Lucky Cat:
+# X0.1 per enhanced card stripped this hand (same-hand via ctx.vampire_consumed, persisted
+# via on_hand_events). Midas Mask is a pure mutation with no scoring/scaling effect.
+
+@register(JokerType.VAMPIRE)
+class _Vampire(JokerEffect):  # wiki: /w/Vampire  — X0.1 Mult per scored Enhanced card, removes Enhancement
+    rarity = Rarity.UNCOMMON
+    cost = 7
+    def rules(self):
+        return RuleFlags(vampire=True)
+    def independent(self, ctx, js):
+        return Effect(xmult=1.0 + 0.1 * (js.counter + ctx.vampire_consumed))
+    def on_hand_events(self, js, events):
+        return dataclasses.replace(js, counter=js.counter + events.vampire_consumed)
+
+
+@register(JokerType.MIDAS_MASK)
+class _MidasMask(JokerEffect):  # wiki: /w/Midas_Mask  — all scored face cards become Gold
+    copyable = False
+    rarity = Rarity.UNCOMMON
+    cost = 7
+    def rules(self):
+        return RuleFlags(midas=True)

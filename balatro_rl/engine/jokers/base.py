@@ -97,6 +97,9 @@ class JokerType(IntEnum):
     # --- Batch 8 (B2b-i): event-scaling enhancement jokers ---
     LUCKY_CAT = 91
     GLASS_JOKER = 120
+    # --- Batch 9 (B2b-ii): card-mutation enhancement jokers ---
+    VAMPIRE = 68
+    MIDAS_MASK = 76
 
 
 class Rarity(IntEnum):
@@ -121,10 +124,14 @@ NO_EFFECT = Effect()
 class RuleFlags:
     splash: bool = False     # every played card scores (Splash)
     all_face: bool = False   # all cards count as face cards (Pareidolia)
+    vampire: bool = False    # strip+count each scored card's enhancement (Vampire)
+    midas: bool = False      # scored face cards become Gold (Midas Mask)
 
     def merge(self, other: "RuleFlags") -> "RuleFlags":
         return RuleFlags(splash=self.splash or other.splash,
-                         all_face=self.all_face or other.all_face)
+                         all_face=self.all_face or other.all_face,
+                         vampire=self.vampire or other.vampire,
+                         midas=self.midas or other.midas)
 
 
 NO_RULES = RuleFlags()
@@ -147,6 +154,7 @@ class HandEvents:
     (Glass Joker); `lucky_triggered` = Lucky cards that triggered (Lucky Cat)."""
     glass_destroyed: int = 0
     lucky_triggered: int = 0
+    vampire_consumed: int = 0   # scored enhanced cards Vampire stripped this hand
 
 
 # Canonical all-zero full-deck enhancement histogram (indexed by Enhancement). Used as
@@ -208,6 +216,10 @@ class ScoreContext:
     # and surfaced on ScoreResult so the engine can persist it via on_hand_events. Stays 0
     # on any hand without a triggering Lucky card -> no behavior change off the mod path.
     lucky_triggers: int = 0
+    # Scored cards whose enhancement Vampire stripped this hand (read same-hand by
+    # Vampire's independent hook for X0.1 each; surfaced on ScoreResult to persist). 0 off
+    # the Vampire path -> no behavior change.
+    vampire_consumed: int = 0
 
 
 class JokerEffect:

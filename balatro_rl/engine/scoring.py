@@ -33,6 +33,11 @@ class ScoreResult:
     money_delta: int = 0              # money gained during scoring (Lucky/Gold seal/Gold enh)
     destroyed_idx: tuple[int, ...] = ()  # indices into the PLAYED hand to destroy (Glass)
     lucky_triggered: int = 0          # # Lucky cards that triggered this hand (Lucky Cat scaling)
+    # Persistent enhancement overrides for played cards: (played_idx, Enhancement). The
+    # engine applies them to master_deck by identity (Vampire strips -> NONE; Midas Mask
+    # converts scored face cards -> GOLD). Empty off the Vampire/Midas path.
+    mutations: tuple = ()
+    vampire_consumed: int = 0         # # enhanced scored cards Vampire stripped (Vampire scaling)
 
 
 def _apply(ctx: ScoreContext, eff) -> None:
@@ -44,8 +49,13 @@ def _apply(ctx: ScoreContext, eff) -> None:
     ctx.mult *= eff.xmult
 
 
-def _score_card_mods(ctx: ScoreContext, card: Card) -> None:
+def _score_card_mods(ctx: ScoreContext, card: Card, skip_enhancement: bool = False) -> None:
     """Apply a SCORED card's enhancement/edition/seal (wiki-verified values).
+
+    `skip_enhancement` nullifies ONLY the enhancement (Bonus/Mult/Glass/Stone/Lucky)
+    while keeping edition (Foil/Holo/Poly) and seal -- used by Vampire, which removes a
+    card's enhancement before it takes effect (its rng-rolling Lucky/Glass effects never
+    fire, so no rng is drawn for a stripped card).
 
     Additive (+chips/+mult) is applied before multiplicative (xmult), matching the
     base fold order. RNG is consumed ONLY by Lucky (its two independent rolls) and
@@ -54,7 +64,7 @@ def _score_card_mods(ctx: ScoreContext, card: Card) -> None:
     Seal money (Gold) and Lucky money flow into ctx.money_delta, never the product.
     Callers MUST skip debuffed cards (their mods are nullified by the boss blind).
     """
-    enh = card.enhancement
+    enh = Enhancement.NONE if skip_enhancement else card.enhancement
     # --- enhancement: additive first ---
     if enh == Enhancement.BONUS:
         ctx.chips += 30
@@ -171,11 +181,26 @@ def score_play(played, jokers: tuple = (), held: tuple = (), *,
                        rng=rng)
     ctx.first_face_idx = next((i for i in scoring_idx if is_face(played[i], rules)), None)
     providers = resolve_providers(jokers)
+    # Persistent master_deck enhancement overrides recorded this hand (Vampire strips ->
+    # NONE; Midas Mask converts scored faces -> GOLD). vampire_idx marks stripped cards so
+    # their (now-removed) Glass enhancement cannot shatter below. Both empty/unused unless
+    # the owning joker's rule flag is set, so the unmodified game is untouched.
+    mutations: list = []
+    vampire_idx: set = set()
 
     # 1) played scoring cards, left to right, with retriggers
     for i in scoring_idx:
         card = played[i]
         skip_mods = i in debuffed   # boss-blind debuff nullifies this card's mods
+        # Vampire: strip+count this card's enhancement BEFORE it scores (keeps edition/seal).
+        consume = rules.vampire and not skip_mods and card.enhancement != Enhancement.NONE
+        if consume:
+            ctx.vampire_consumed += 1
+            mutations.append((i, Enhancement.NONE))
+            vampire_idx.add(i)
+        # Midas Mask: a scored face card becomes Gold (no on-score effect; persists to deck).
+        if rules.midas and not skip_mods and is_face(card, rules):
+            mutations.append((i, Enhancement.GOLD))
         retriggers = sum(eff.retrigger(ctx, card, js) for eff, js in providers)
         # RED seal retriggers this card once more (re-scoring re-applies everything).
         if not skip_mods and card.seal == Seal.RED:
@@ -188,7 +213,7 @@ def score_play(played, jokers: tuple = (), held: tuple = (), *,
             for eff, js in providers:
                 _apply(ctx, eff.on_score(ctx, card, i, js))
             if not skip_mods:
-                _score_card_mods(ctx, card)
+                _score_card_mods(ctx, card, skip_enhancement=consume)
 
     # 2) held-in-hand cards
     for card in held:
@@ -211,7 +236,7 @@ def score_play(played, jokers: tuple = (), held: tuple = (), *,
     # card, in scoring (L->R) order, consuming ctx.rng only for Glass cards. Debuffed
     # Glass cannot shatter (its mod is nullified). destroyed_idx holds PLAYED indices.
     for i in scoring_idx:
-        if i in debuffed:
+        if i in debuffed or i in vampire_idx:   # Vampire-stripped Glass can't shatter
             continue
         if played[i].enhancement == Enhancement.GLASS:
             roll, ctx.rng = ctx.rng.random()
@@ -225,4 +250,6 @@ def score_play(played, jokers: tuple = (), held: tuple = (), *,
                        chips=ctx.chips, mult=ctx.mult, scoring_idx=tuple(scoring_idx),
                        rng=ctx.rng, money_delta=ctx.money_delta,
                        destroyed_idx=tuple(ctx.destroyed_idx),
-                       lucky_triggered=ctx.lucky_triggers)
+                       lucky_triggered=ctx.lucky_triggers,
+                       mutations=tuple(mutations),
+                       vampire_consumed=ctx.vampire_consumed)
