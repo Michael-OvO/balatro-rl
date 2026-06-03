@@ -73,7 +73,9 @@ def reset(seed: int, scale: float = 1.0) -> GameState:
         deck=tuple(deck), hand=tuple(hand), ante=1, blind_index=0,
         round_score=0, required=required_score(1, 0, scale),
         hands_left=HANDS_PER_BLIND, discards_left=DISCARDS_PER_BLIND,
-        hand_size=HAND_SIZE, levels=tuple([1] * 12), money=STARTING_MONEY,
+        hand_size=HAND_SIZE, levels=tuple([1] * 12),
+        hand_plays_run=tuple([0] * 12), hand_plays_round=tuple([0] * 12),
+        money=STARTING_MONEY,
         rng=rng, phase=Phase.PLAYING, done=False, won=False, jokers=jokers,
         shop_offers=(), rerolls_done=0, req_scale=scale,
     )
@@ -124,6 +126,7 @@ def _advance_blind(state: GameState):
         state, ante=new_ante, blind_index=new_blind, deck=tuple(deck), hand=tuple(hand),
         round_score=0, required=required_score(new_ante, new_blind, state.req_scale),
         hands_left=HANDS_PER_BLIND, discards_left=DISCARDS_PER_BLIND, rng=rng,
+        hand_plays_round=tuple([0] * 12),  # per-round counter resets each blind
         jokers=jokers, phase=Phase.PLAYING, shop_offers=(), rerolls_done=0, shop_steps=0)
     return nxt, {"verb": "leave_shop", "result": "next_blind",
                  "ante": new_ante, "blind": new_blind}
@@ -195,7 +198,9 @@ def step(state: GameState, action: tuple[Verb, tuple[int, ...]]) -> tuple[GameSt
     res = score_play(selected, jokers=state.jokers, held=tuple(held),
                      joker_slots=JOKER_SLOTS, money=state.money,
                      hands_left=state.hands_left, discards_left=state.discards_left,
-                     deck_count=len(state.deck), rng=state.rng)
+                     deck_count=len(state.deck),
+                     hand_plays_run=state.hand_plays_run,
+                     hand_plays_round=state.hand_plays_round, rng=state.rng)
     # Probabilistic scoring jokers (Misprint, Bloodstone) consumed state.rng; the
     # advanced rng rides back on res.rng and MUST be written into every successor
     # state below so a fixed seed reproduces the same rolls deterministically.
@@ -210,6 +215,11 @@ def step(state: GameState, action: tuple[Verb, tuple[int, ...]]) -> tuple[GameSt
         )
     else:
         new_jokers = state.jokers
+    # Now (AFTER the joker on_play fold, which reads PRE-increment counts off `state`
+    # for Obelisk) bump the per-HandType play counters for the hand just played.
+    ht = int(res.hand_type)
+    plays_run = tuple(c + (1 if i == ht else 0) for i, c in enumerate(state.hand_plays_run))
+    plays_round = tuple(c + (1 if i == ht else 0) for i, c in enumerate(state.hand_plays_round))
     round_score = state.round_score + res.score
     hands_left = state.hands_left - 1
     info = {"verb": "play", "score": res.score, "hand_type": int(res.hand_type),
@@ -219,7 +229,8 @@ def step(state: GameState, action: tuple[Verb, tuple[int, ...]]) -> tuple[GameSt
         # Blind cleared: cash out then enter the shop (or win at the Ante-8 boss);
         # _advance_blind on shop-leave reshuffles a fresh deck and redraws.
         carried = dataclasses.replace(state, jokers=new_jokers, round_score=round_score,
-                                      hands_left=hands_left, rng=rng)  # decremented count feeds cash-out
+                                      hands_left=hands_left, rng=rng,
+                                      hand_plays_run=plays_run, hand_plays_round=plays_round)
         return _enter_cashout_or_win(carried, info)
 
     hand, deck = _draw(remaining, list(state.deck), state.hand_size)
@@ -227,11 +238,13 @@ def step(state: GameState, action: tuple[Verb, tuple[int, ...]]) -> tuple[GameSt
         lost = dataclasses.replace(state, hand=tuple(hand), deck=tuple(deck),
                                    round_score=round_score, hands_left=0,
                                    done=True, won=False, phase=Phase.LOST,
-                                   jokers=new_jokers, rng=rng)
+                                   jokers=new_jokers, rng=rng,
+                                   hand_plays_run=plays_run, hand_plays_round=plays_round)
         return lost, {**info, "result": "lost"}
     nxt = dataclasses.replace(state, hand=tuple(hand), deck=tuple(deck),
                               round_score=round_score, hands_left=hands_left,
-                              jokers=new_jokers, rng=rng)
+                              jokers=new_jokers, rng=rng,
+                              hand_plays_run=plays_run, hand_plays_round=plays_round)
     return nxt, info
 
 

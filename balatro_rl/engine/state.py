@@ -31,6 +31,12 @@ class GameState:
     discards_left: int
     hand_size: int
     levels: tuple[int, ...]     # 12 hand-type levels (HandType order)
+    # Times each HandType has been played, in HandType order (mirrors `levels`).
+    # _run never resets; _round resets to zeros at each blind boundary. Both are
+    # incremented AFTER a played hand is scored (so a joker scoring THAT hand sees
+    # the PRE-increment count via ScoreContext.hand_plays_run / _round).
+    hand_plays_run: tuple[int, ...]
+    hand_plays_round: tuple[int, ...]
     money: int
     rng: RNG
     phase: Phase

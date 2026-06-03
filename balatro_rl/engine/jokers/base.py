@@ -81,6 +81,10 @@ class JokerType(IntEnum):
     ANCIENT_JOKER = 99
     THE_IDOL = 127
     MAIL_IN_REBATE = 83
+    # --- Batch 6: hand-play counts (run/round) ---
+    SUPERNOVA = 43
+    CARD_SHARP = 62
+    OBELISK = 75
 
 
 class Rarity(IntEnum):
@@ -148,6 +152,15 @@ class ScoreContext:
     hands_left: int = 0         # hands remaining this blind
     discards_left: int = 0      # discards remaining this blind
     deck_count: int = 0         # cards left in the draw pile
+    # Times the CURRENT hand_type has been played, PRE-increment of this play
+    # (i.e. NOT counting the hand being scored). Supernova adds +1 to include the
+    # current play; Card Sharp fires when hand_plays_round >= 1 (already this round).
+    hand_plays_run: int = 0     # this run
+    hand_plays_round: int = 0   # this round
+    # Max run play-count among all OTHER hand types (PRE-increment). Lets Obelisk
+    # decide AT SCORING TIME whether the hand being played becomes the strict
+    # most-played hand (reset) -- wiki: "Obelisk resets before the hand is scored".
+    hand_plays_run_max_other: int = 0
     # Probabilistic-scoring RNG. Hooks that consume randomness reassign it in place
     # (`roll, ctx.rng = ctx.rng.random()`); score_play threads the advanced rng back
     # out to GameState so a fixed seed reproduces every roll. Defaults to a fixed seed

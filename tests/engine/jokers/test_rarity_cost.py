@@ -59,6 +59,19 @@ def test_batch5_jokers_declare_rarity_and_cost():
         assert eff.cost == cost, jt
 
 
+def test_batch6_jokers_declare_rarity_and_cost():
+    # wiki: /w/Supernova /w/Card_Sharp /w/Obelisk
+    expected = {
+        JokerType.SUPERNOVA: (Rarity.COMMON, 5),
+        JokerType.CARD_SHARP: (Rarity.UNCOMMON, 6),
+        JokerType.OBELISK: (Rarity.RARE, 8),
+    }
+    for jt, (rar, cost) in expected.items():
+        eff = REGISTRY[jt]
+        assert eff.rarity == rar, jt
+        assert eff.cost == cost, jt
+
+
 def test_batch1_jokers_declare_rarity_and_cost():
     # wiki: docs/reference/jokers.md
     expected = {

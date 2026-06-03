@@ -5,7 +5,7 @@ from __future__ import annotations
 
 import dataclasses
 
-from ..hands import HandType, contains, is_face
+from ..hands import HandType, contains, evaluate, is_face
 from .base import (
     Effect, JokerEffect, JokerState, JokerType, Rarity, RuleFlags,
     NO_RULES, aggregate_rules, register,
@@ -640,3 +640,69 @@ class _MailInRebate(JokerEffect):  # wiki: /w/Mail-In_Rebate  — $5 per discard
         target = int(js.counter)
         money = 5 * sum(1 for c in discarded if c.rank == target)
         return js, money, rng
+
+
+# --- Batch 6: hand-play-count jokers (read GameState.hand_plays_run / _round) ---
+
+@register(JokerType.SUPERNOVA)
+class _Supernova(JokerEffect):  # wiki: /w/Supernova
+    # "Adds the number of times poker hand has been played this run to Mult."
+    # Wiki/game: the current play IS counted (retroactive + this hand). ScoreContext
+    # exposes the PRE-increment run count, so add +1 to include the hand being scored
+    # (first-ever play of a hand type -> +1 Mult).
+    rarity = Rarity.COMMON
+    cost = 5
+    def independent(self, ctx, js):
+        return Effect(mult=ctx.hand_plays_run + 1)
+
+
+@register(JokerType.CARD_SHARP)
+class _CardSharp(JokerEffect):  # wiki: /w/Card_Sharp
+    # "X3 Mult if played poker hand has already been played this round."
+    # "Already this round" excludes the current play -> fire when the PRE-increment
+    # round count for this hand_type is >= 1 (a prior play this round).
+    rarity = Rarity.UNCOMMON
+    cost = 6
+    def independent(self, ctx, js):
+        return Effect(xmult=3.0) if ctx.hand_plays_round >= 1 else Effect()
+
+
+@register(JokerType.OBELISK)
+class _Obelisk(JokerEffect):  # wiki: /w/Obelisk
+    # "This Joker gains X0.2 Mult per consecutive hand played without playing your
+    # most played poker hand"; resets to X1 when you play your most-played hand.
+    # Wiki: "The Obelisk resets before the hand is scored" and "Obelisk will only
+    # reset once you break the tie ... (you play one of those hands one more time)".
+    #
+    # Key timing: the counter is UPDATED BEFORE this hand scores, so the current
+    # hand reflects the post-update value (reset -> scores at X1; gain -> scores
+    # with the new +X0.2 step). js.counter = number of accumulated +X0.2 steps;
+    # xMult = 1 + 0.2 * counter. `independent` computes the updated counter from the
+    # PRE-increment counts on the context and applies it to THIS hand; `on_play`
+    # persists the same update (engine increments the run counter afterwards).
+    rarity = Rarity.RARE
+    cost = 8
+
+    @staticmethod
+    def _next_counter(counter, plays_run_self_pre, plays_run_max_other):
+        # `plays_run_self_pre` is the run count for THIS hand_type BEFORE this play.
+        cur = plays_run_self_pre + 1            # count incl. the hand being played
+        # Reset only when THIS hand becomes the STRICT unique most-played hand;
+        # merely tying the leader is "safe" and keeps scaling (wiki tie note).
+        if cur > plays_run_max_other:
+            return 0.0
+        return counter + 1.0
+
+    def independent(self, ctx, js):
+        counter = self._next_counter(js.counter, ctx.hand_plays_run,
+                                     ctx.hand_plays_run_max_other)
+        return Effect(xmult=1.0 + 0.2 * counter)
+
+    def on_play(self, state, played, scoring_idx, rules, js):
+        # state.hand_plays_run is PRE-increment; include the hand just played.
+        ht = int(evaluate(list(played), rules)[0])
+        runs = list(state.hand_plays_run) if state is not None else [0] * 12
+        self_pre = runs[ht] if ht < len(runs) else 0
+        max_other = max((c for i, c in enumerate(runs) if i != ht), default=0)
+        counter = self._next_counter(js.counter, self_pre, max_other)
+        return dataclasses.replace(js, counter=counter)

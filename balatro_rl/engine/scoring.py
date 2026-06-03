@@ -40,12 +40,19 @@ def _apply(ctx: ScoreContext, eff) -> None:
 
 def score_play(played, jokers: tuple = (), held: tuple = (), *,
                joker_slots: int = 5, money: int = 0, hands_left: int = 0,
-               discards_left: int = 0, deck_count: int = 0, rng=None) -> ScoreResult:
+               discards_left: int = 0, deck_count: int = 0,
+               hand_plays_run: tuple = (), hand_plays_round: tuple = (),
+               rng=None) -> ScoreResult:
     """Score one played hand.
 
     The keyword-only scalars carry read-only game-state info to state-reading
     jokers (Bull, Banner, Mystic Summit, Blue Joker, ...). The engine threads
     them from GameState; callers that only need pure hand scoring may omit them.
+
+    `hand_plays_run` / `hand_plays_round` are the length-12 per-HandType play-count
+    tuples (PRE-increment of THIS hand). score_play indexes them by the hand type it
+    evaluates and exposes the current-hand count on ScoreContext for Supernova /
+    Card Sharp. Empty tuples (default) read as 0 so pure-scoring callers still work.
 
     `rng` feeds probabilistic scoring jokers (Misprint, Bloodstone). Hooks consume
     it by reassigning ctx.rng in place; the ADVANCED rng is returned on ScoreResult
@@ -59,6 +66,11 @@ def score_play(played, jokers: tuple = (), held: tuple = (), *,
     hand_type, scoring_idx = evaluate(played, rules)
     base_chips, base_mult = HAND_BASE[hand_type]
 
+    ht = int(hand_type)
+    plays_run = hand_plays_run[ht] if ht < len(hand_plays_run) else 0
+    plays_round = hand_plays_round[ht] if ht < len(hand_plays_round) else 0
+    plays_run_max_other = max(
+        (c for i, c in enumerate(hand_plays_run) if i != ht), default=0)
     n_jokers = len(jokers)
     ctx = ScoreContext(chips=base_chips, mult=float(base_mult), played=played,
                        scoring_idx=list(scoring_idx), held=list(held),
@@ -67,7 +79,9 @@ def score_play(played, jokers: tuple = (), held: tuple = (), *,
                        n_jokers=n_jokers,
                        empty_joker_slots=max(0, joker_slots - n_jokers),
                        money=money, hands_left=hands_left,
-                       discards_left=discards_left, deck_count=deck_count, rng=rng)
+                       discards_left=discards_left, deck_count=deck_count,
+                       hand_plays_run=plays_run, hand_plays_round=plays_round,
+                       hand_plays_run_max_other=plays_run_max_other, rng=rng)
     ctx.first_face_idx = next((i for i in scoring_idx if is_face(played[i], rules)), None)
     providers = resolve_providers(jokers)
 
