@@ -11,12 +11,28 @@ from __future__ import annotations
 
 import dataclasses
 
-from .cards import Card, Edition, Enhancement, Seal, is_stone, rank_chip_value
+from .cards import Card, Edition, Enhancement, Seal, card_str, is_stone, rank_chip_value
 from .hands import HandType, contains, evaluate, is_face, leveled_base
 from .jokers.base import (
-    DECK_ENH_ZEROS, NO_RULES, ScoreContext, aggregate_rules, resolve_providers,
+    DECK_ENH_ZEROS, NO_RULES, JokerType, ScoreContext, aggregate_rules, resolve_providers,
 )
 from .rng import RNG
+
+
+def _t(ctx: ScoreContext, label: str) -> None:
+    """Record a running-total breakdown event for the viewer (no-op off the trace path)."""
+    if ctx.trace is not None:
+        ctx.trace.append({"label": label, "chips": int(ctx.chips),
+                          "mult": round(float(ctx.mult), 4)})
+
+
+def _apply_traced(ctx: ScoreContext, eff, js) -> None:
+    """_apply + (for the viewer) record this joker's contribution if it changed chips/mult.
+    The joker name is built lazily so the engine hot path (trace=None) pays nothing."""
+    c0, m0 = ctx.chips, ctx.mult
+    _apply(ctx, eff)
+    if ctx.trace is not None and (ctx.chips != c0 or ctx.mult != m0):
+        _t(ctx, JokerType(js.type).name)
 
 
 @dataclasses.dataclass(frozen=True, slots=True)
@@ -64,14 +80,18 @@ def _score_card_mods(ctx: ScoreContext, card: Card, skip_enhancement: bool = Fal
     Seal money (Gold) and Lucky money flow into ctx.money_delta, never the product.
     Callers MUST skip debuffed cards (their mods are nullified by the boss blind).
     """
+    lbl = card_str(card) if ctx.trace is not None else ""
     enh = Enhancement.NONE if skip_enhancement else card.enhancement
     # --- enhancement: additive first ---
     if enh == Enhancement.BONUS:
         ctx.chips += 30
+        _t(ctx, f"{lbl} Bonus +30 chips")
     elif enh == Enhancement.MULT:
         ctx.mult += 4
+        _t(ctx, f"{lbl} Mult +4 mult")
     elif enh == Enhancement.STONE:
         ctx.chips += 50                 # Stone's flat value (it has no rank chips)
+        _t(ctx, f"{lbl} Stone +50 chips")
     elif enh == Enhancement.LUCKY:
         # Two INDEPENDENT rolls: 1-in-5 -> +20 Mult, 1-in-15 -> +$20. Both consume
         # ctx.rng (mult roll first, then money roll), mirroring how Misprint/
@@ -81,6 +101,7 @@ def _score_card_mods(ctx: ScoreContext, card: Card, skip_enhancement: bool = Fal
         if roll < 1 / 5:
             ctx.mult += 20
             triggered = True
+            _t(ctx, f"{lbl} Lucky +20 mult")
         roll, ctx.rng = ctx.rng.random()
         if roll < 1 / 15:
             ctx.money_delta += 20
@@ -94,13 +115,17 @@ def _score_card_mods(ctx: ScoreContext, card: Card, skip_enhancement: bool = Fal
     ed = card.edition
     if ed == Edition.FOIL:
         ctx.chips += 50
+        _t(ctx, f"{lbl} Foil +50 chips")
     elif ed == Edition.HOLO:
         ctx.mult += 10
+        _t(ctx, f"{lbl} Holo +10 mult")
     # --- enhancement xmult (Glass) then edition xmult (Poly) ---
     if enh == Enhancement.GLASS:
         ctx.mult *= 2
+        _t(ctx, f"{lbl} Glass X2 mult")
     if ed == Edition.POLY:
         ctx.mult *= 1.5
+        _t(ctx, f"{lbl} Poly X1.5 mult")
     # --- seal money (Gold pays $3 when the card scores) ---
     if card.seal == Seal.GOLD:
         ctx.money_delta += 3
@@ -113,7 +138,8 @@ def score_play(played, jokers: tuple = (), held: tuple = (), *,
                discards_left: int = 0, deck_count: int = 0,
                hand_plays_run: tuple = (), hand_plays_round: tuple = (),
                deck_enh_counts: tuple = (), debuffed_idx: tuple = (),
-               levels: tuple = (), flint: bool = False, rng=None) -> ScoreResult:
+               levels: tuple = (), flint: bool = False, trace: list | None = None,
+               rng=None) -> ScoreResult:
     """Score one played hand.
 
     The keyword-only scalars carry read-only game-state info to state-reading
@@ -186,7 +212,11 @@ def score_play(played, jokers: tuple = (), held: tuple = (), *,
                        hand_plays_run=plays_run, hand_plays_round=plays_round,
                        hand_plays_run_max_other=plays_run_max_other,
                        deck_enh_counts=tuple(deck_enh_counts) or DECK_ENH_ZEROS,
-                       rng=rng)
+                       trace=trace, rng=rng)
+    if trace is not None:
+        _lvl = levels[ht] if ht < len(levels) else 1
+        _t(ctx, f"{hand_type.name} base" + (f" (lvl {_lvl})" if _lvl > 1 else "")
+           + (" /Flint" if flint else ""))
     ctx.first_face_idx = next(
         (i for i in scoring_idx if i not in debuffed and is_face(played[i], rules)), None)
     providers = resolve_providers(jokers)
@@ -223,14 +253,16 @@ def score_play(played, jokers: tuple = (), held: tuple = (), *,
             # comes from the mod fold below.
             if not is_stone(card):
                 ctx.chips += rank_chip_value(card.rank)
+                if ctx.trace is not None:
+                    _t(ctx, f"{card_str(card)} +{rank_chip_value(card.rank)} chips")
             for eff, js in providers:
-                _apply(ctx, eff.on_score(ctx, card, i, js))
+                _apply_traced(ctx, eff.on_score(ctx, card, i, js), js)
             _score_card_mods(ctx, card, skip_enhancement=consume)
 
     # 2) held-in-hand cards
     for card in held:
         for eff, js in providers:
-            _apply(ctx, eff.on_held(ctx, card, js))
+            _apply_traced(ctx, eff.on_held(ctx, card, js), js)
     # 2b) held-card mods: a held STEEL card gives X1.5 Mult (wiki: Steel Card).
     # Reuses the held phase; unmodified held cards are a no-op (no Steel present).
     # NOTE: held cards are not (yet) addressable by boss debuffs, so no debuff skip
@@ -238,10 +270,12 @@ def score_play(played, jokers: tuple = (), held: tuple = (), *,
     for card in held:
         if card.enhancement == Enhancement.STEEL:
             ctx.mult *= 1.5
+            if ctx.trace is not None:
+                _t(ctx, f"{card_str(card)} Steel X1.5 mult (held)")
 
     # 3) independent jokers, slot order
     for eff, js in providers:
-        _apply(ctx, eff.independent(ctx, js))
+        _apply_traced(ctx, eff.independent(ctx, js), js)
 
     # 4) Glass shatter: AFTER all scoring is finished, each scored GLASS card has a
     # 1-in-4 chance to be destroyed (wiki: Glass Card). One roll per Glass scoring
