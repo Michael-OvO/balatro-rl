@@ -20,6 +20,8 @@ import json
 import os
 from collections import Counter
 
+from balatro_rl.engine.cards import Edition, Enhancement, Seal
+
 # The picker lists episodes from here (where the sweep writes <run>.episode.json).
 EPISODE_DIR = os.environ.get("BALATRO_EPISODE_DIR", "/tmp/sweep_out")
 
@@ -85,9 +87,15 @@ _STYLE = """<style>
 .ribbon{position:absolute;top:-8px;left:50%;transform:translateX(-50%);font-size:8px;
   font-weight:800;color:#fff;padding:1px 5px;border-radius:6px}
 .rb-play{background:#2f7fe0}.rb-disc{background:#6b7280}.rb-new{background:#22a957}
-.jokers{display:flex;gap:6px;margin-bottom:9px;flex-wrap:wrap}
-.jk{font-size:11px;font-weight:700;background:#3a2d5c;color:#fff !important;padding:3px 8px;border-radius:6px}
-.jk.add{background:#15803d}.jk.rem{background:#7f1d1d;text-decoration:line-through;opacity:.65}
+.jokers{display:flex;gap:7px;margin-bottom:9px;flex-wrap:wrap}
+.jk{display:flex;flex-direction:column;gap:2px;max-width:200px;font-size:11px;font-weight:700;
+  background:#3a2d5c;color:#fff !important;padding:4px 9px;border-radius:7px;border:1px solid #4c3f7a}
+.jk .jk-name{font-weight:800}
+.jk .jk-cnt{color:#ffd66b !important;font-weight:800}
+.jk .jk-desc{font-size:10px;font-weight:500;line-height:1.25;color:#cbb9ff !important;
+  white-space:normal;opacity:.95}
+.jk.add{background:#15803d;border-color:#22a957}.jk.add .jk-desc{color:#bbf7d0 !important}
+.jk.rem{background:#7f1d1d;border-color:#b91c1c;opacity:.7}.jk.rem .jk-name{text-decoration:line-through}
 .shop{display:flex;gap:8px;flex-wrap:wrap;margin-top:6px}
 .offer{font-size:12px;font-weight:700;background:#2a2540;color:#cbb9ff;
   padding:5px 9px;border-radius:7px;border:1px solid #4c3f7a}
@@ -111,6 +119,42 @@ _STYLE = """<style>
 .pbar-num{width:46px;text-align:right;color:#9aa0b0}
 .pre{white-space:pre;font-family:ui-monospace,Menlo,monospace;font-size:12px;
   background:#0f1115;color:#d4d4d8;padding:10px;border-radius:8px;overflow-x:auto}
+/* --- boss banner --- */
+.boss{display:flex;align-items:center;gap:11px;margin:9px 0 2px;padding:9px 14px;border-radius:9px;
+  background:linear-gradient(90deg,#3b0d0d,#5a1620);border:1px solid #b91c1c;
+  box-shadow:0 2px 8px rgba(120,10,10,.35)}
+.boss .boss-ico{font-size:22px;line-height:1}
+.boss .boss-name{font-size:15px;font-weight:800;color:#ffb4ab !important}
+.boss .boss-desc{font-size:12px;font-weight:600;color:#fcd9d4 !important;opacity:.95}
+/* --- consumables panel --- */
+.consums{display:flex;gap:7px;margin-bottom:9px;flex-wrap:wrap}
+.con{display:flex;flex-direction:column;gap:2px;max-width:200px;font-size:11px;font-weight:700;
+  background:#12304a;color:#fff !important;padding:4px 9px;border-radius:7px;border:1px solid #2c6491}
+.con .con-name{font-weight:800;color:#bfe3ff !important}
+.con .con-desc{font-size:10px;font-weight:500;line-height:1.25;color:#9fc8e8 !important}
+/* --- card modifier badges --- */
+.badges{position:absolute;bottom:-7px;left:50%;transform:translateX(-50%);display:flex;gap:2px;
+  flex-wrap:wrap;justify-content:center;max-width:74px}
+.badge{font-size:7px;font-weight:800;color:#fff !important;padding:1px 4px;border-radius:5px;
+  line-height:1.2;white-space:nowrap;box-shadow:0 1px 2px rgba(0,0,0,.4)}
+.bd-enh{background:#2563eb}.bd-ed{background:#9333ea}.bd-seal{background:#b45309}
+/* --- score-trace tally (the centerpiece) --- */
+.trace{background:#0f1115;border-radius:9px;padding:8px 11px;margin:9px 0 2px}
+.trace-row{display:grid;grid-template-columns:1fr auto auto;gap:8px;align-items:center;
+  padding:3px 0;border-bottom:1px solid #1d2130;font-size:12px}
+.trace-row:last-child{border-bottom:none}
+.trace-lbl{color:#cbd0da;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.trace-run{font-family:ui-monospace,Menlo,monospace;color:#e8e8ea;text-align:right;white-space:nowrap}
+.trace-run .chips{color:#5ea0ff !important;font-weight:700}
+.trace-run .mult{color:#ff6f3c !important;font-weight:700}
+.trace-delta{font-size:11px;font-weight:800;text-align:right;min-width:78px;white-space:nowrap}
+.trace-delta.chip{color:#5ea0ff !important}.trace-delta.mlt{color:#ff6f3c !important}
+.trace-delta.xmlt{color:#f59e0b !important}.trace-delta.none{color:#5b6072 !important}
+.trace-row.base .trace-lbl{font-weight:700;color:#9aa0b0}
+.trace-row.final{border-top:2px solid #2f7fe0;margin-top:2px;padding-top:6px;font-size:14px;font-weight:800}
+.trace-row.final .trace-lbl{color:#fff;font-weight:800}
+.trace-row.final .trace-run{color:#fff;font-weight:800}
+.trace-row.final .score{color:#ffd66b !important}
 </style>"""
 
 
@@ -126,12 +170,30 @@ def _ckey(c):   # identity for the multiset diff; tolerant of missing modifier k
     return (c["rank"], c["suit"], c.get("enh", 0), c.get("ed", 0), c.get("seal", 0))
 
 
+def _mod_badges(card: dict) -> str:
+    """Compact corner tags for a card's enhancement/edition/seal (0 = none).
+
+    Tolerant of legacy steps where these keys may be absent (defaults to none)."""
+    out = []
+    enh = card.get("enh", 0)
+    ed = card.get("ed", 0)
+    seal = card.get("seal", 0)
+    if enh:
+        out.append(f'<span class="badge bd-enh">{Enhancement(enh).name.title()}</span>')
+    if ed:
+        out.append(f'<span class="badge bd-ed">{Edition(ed).name.title()}</span>')
+    if seal:
+        out.append(f'<span class="badge bd-seal">{Seal(seal).name.title()} seal</span>')
+    return f'<div class="badges">{"".join(out)}</div>' if out else ""
+
+
 def card_html(card: dict, *, state: str = "held", small: bool = False) -> str:
     """One self-contained card tile. state in held|played|disc|new|left.
 
     Colours are set INLINE (not via the .red/.blk classes) because Gradio's theme
     applies a descendant text-colour that overrides class-based colour; inline wins.
-    The suit glyph carries VS15 (&#xFE0E;) to force monochrome TEXT, not an emoji."""
+    The suit glyph carries VS15 (&#xFE0E;) to force monochrome TEXT, not an emoji.
+    A card with enh/ed/seal != 0 gets compact corner badges (GLASS / FOIL / GOLD seal)."""
     col = "red" if _is_red(card["suit"]) else "blk"
     hexc = "#d6453a" if col == "red" else "#141414"
     r = _rank_txt(card["rank"])
@@ -145,7 +207,8 @@ def card_html(card: dict, *, state: str = "held", small: bool = False) -> str:
     return (f'<div class="card{cls}" style="{cstyle}">{rib}'
             f'<div class="r {col}" style="{tcol}">{r}</div>'
             f'<div class="big {col}" style="{tcol}">{g}</div>'
-            f'<div class="br {col}" style="{tcol}">{r}{g}</div></div>')
+            f'<div class="br {col}" style="{tcol}">{r}{g}</div>'
+            f'{_mod_badges(card)}</div>')
 
 
 def _delta_row(label, prev, cur, *, money=False):
@@ -231,20 +294,114 @@ def _progress(s):
 
 
 def _jokers_html(cur, prev):
+    """Joker chips, each showing its name, scaling counter, and effect text (visible at a
+    glance, not hover-only). Legacy steps without a 'desc' just omit the subtitle line."""
     cur_j = cur.get("jokers", [])
     prev_j = (prev or {}).get("jokers", [])
     cur_names = Counter(j["name"] for j in cur_j)
     prev_names = Counter(j["name"] for j in prev_j)
     chips = []
     for j in cur_j:
-        c = f' &times;{j["counter"]:.0f}' if j.get("counter") else ""
+        c = f' <span class="jk-cnt">&times;{j["counter"]:.0f}</span>' if j.get("counter") else ""
         cls = " add" if cur_names[j["name"]] > prev_names[j["name"]] else ""
-        chips.append(f'<span class="jk{cls}">{html.escape(j["name"])}{c}</span>')
+        desc = j.get("desc", "")
+        desc_html = f'<span class="jk-desc">{html.escape(desc)}</span>' if desc else ""
+        chips.append(f'<span class="jk{cls}"><span class="jk-name">{html.escape(j["name"])}'
+                     f'{c}</span>{desc_html}</span>')
     for name in (prev_names - cur_names).elements():   # sold / lost since prev step
-        chips.append(f'<span class="jk rem">{html.escape(name)}</span>')
+        chips.append(f'<span class="jk rem"><span class="jk-name">{html.escape(name)}</span></span>')
     if not chips:
-        chips = ['<span class="jk" style="opacity:.5">no jokers</span>']
+        chips = ['<span class="jk" style="opacity:.5"><span class="jk-name">no jokers</span></span>']
     return '<div class="bv-sec">Jokers</div><div class="jokers">' + "".join(chips) + "</div>"
+
+
+def _boss_banner(s):
+    """Prominent banner for the active boss blind (name + what it does). Empty when the
+    step has no boss (legacy steps lack the key entirely -> also empty)."""
+    boss = s.get("boss") or {}
+    if not boss:
+        return ""
+    name = html.escape(boss.get("name", "Boss Blind"))
+    desc = html.escape(boss.get("desc", ""))
+    sep = " &mdash; " if desc else ""
+    return ('<div class="boss"><span class="boss-ico">&#128121;</span>'
+            f'<span><span class="boss-name">{name}</span>'
+            f'{sep}<span class="boss-desc">{desc}</span></span></div>')
+
+
+def _consumables_html(s):
+    """Small panel listing each consumable's name + effect (mirrors the jokers panel).
+    Empty when the step holds no consumables (or the key is absent on legacy steps)."""
+    cons = s.get("consumables") or []
+    if not cons:
+        return ""
+    chips = []
+    for c in cons:
+        desc = c.get("desc", "")
+        desc_html = f'<span class="con-desc">{html.escape(desc)}</span>' if desc else ""
+        chips.append(f'<span class="con"><span class="con-name">{html.escape(c.get("name", "?"))}'
+                     f'</span>{desc_html}</span>')
+    return '<div class="bv-sec">Consumables</div><div class="consums">' + "".join(chips) + "</div>"
+
+
+def _run_cell(chips, mult):
+    """The running 'chips × mult' cell, with chips and mult colour-coded."""
+    return (f'<span class="chips">{chips:g}</span> &times; '
+            f'<span class="mult">{mult:g}</span>')
+
+
+def _trace_delta(prev, cur):
+    """Human delta between two trace rows -> (text, css class). Detects added chips,
+    added mult, or a multiplicative mult bump (X2 mult etc.)."""
+    if prev is None:
+        return "base hand", "none"
+    dc = cur["chips"] - prev["chips"]
+    dm = cur["mult"] - prev["mult"]
+    if dc and not dm:
+        return f"{dc:+g} chips", "chip"
+    if dm and not dc:
+        # multiplicative if it cleanly scales the previous mult (e.g. X2), else additive
+        if prev["mult"] and abs(cur["mult"] / prev["mult"] - round(cur["mult"] / prev["mult"])) < 1e-6 \
+                and cur["mult"] / prev["mult"] >= 2:
+            return f"&times;{cur['mult'] / prev['mult']:g} mult", "xmlt"
+        return f"{dm:+g} mult", "mlt"
+    if dc and dm:
+        return f"{dc:+g} chips &middot; {dm:+g} mult", "chip"
+    return "&mdash;", "none"
+
+
+def _score_trace_html(step):
+    """THE CENTERPIECE: render a PLAY step's score_trace as a vertical tally.
+
+    One row per contribution (base hand, each scored card, each joker, each enhancement),
+    each showing the label, the running 'chips × mult', and the delta from the prior row
+    (+chips / +mult / ×mult). Ends with a bold 'chips × mult = score' final row.
+    Returns '' for non-PLAY steps or steps without a trace (legacy-safe)."""
+    trace = step.get("score_trace") or []
+    if not trace:
+        return ""
+    rows = []
+    prev = None
+    for k, entry in enumerate(trace):
+        chips, mult = entry.get("chips", 0), entry.get("mult", 0)
+        cur = {"chips": chips, "mult": mult}
+        dtxt, dcls = _trace_delta(prev, cur)
+        base = " base" if k == 0 else ""
+        rows.append(f'<div class="trace-row{base}">'
+                    f'<span class="trace-lbl">{html.escape(str(entry.get("label", "")))}</span>'
+                    f'<span class="trace-run">{_run_cell(chips, mult)}</span>'
+                    f'<span class="trace-delta {dcls}">{dtxt}</span></div>')
+        prev = cur
+    last = trace[-1]
+    fchips, fmult = last.get("chips", 0), last.get("mult", 0)
+    final = int(round(fchips * fmult))
+    rows.append('<div class="trace-row final">'
+                '<span class="trace-lbl">final</span>'
+                f'<span class="trace-run">{_run_cell(fchips, fmult)} = '
+                f'<span class="score">{final}</span></span>'
+                '<span class="trace-delta none"></span></div>')
+    return ('<div class="bv-sec">Score breakdown</div>'
+            '<div class="trace">' + "".join(rows) + "</div>")
 
 
 def _hand_html(s):
@@ -323,10 +480,13 @@ def render_focus(step_index: int, steps: list[dict]) -> str:
                 + '<div class="bv-sec">Board (legacy episode)</div>'
                 + f'<div class="pre">{html.escape(s["board"])}</div></div>')
     in_shop = s.get("phase") == "SHOP" or bool(s.get("shop_offers"))
-    table = _jokers_html(s, prev) + (_shop_html(s) if in_shop else _hand_html(s))
-    body = (_banner(s) + _progress(s)
+    table = (_jokers_html(s, prev) + _consumables_html(s)
+             + (_shop_html(s) if in_shop else _hand_html(s)))
+    # Score breakdown sits in the diff column for PLAY steps (next to the deltas / hand).
+    diff = _score_trace_html(s) + _diff_panel(s, prev)
+    body = (_banner(s) + _boss_banner(s) + _progress(s)
             + '<div class="bv-cols"><div class="bv-table">' + table + '</div>'
-            + '<div class="bv-diff">' + _diff_panel(s, prev) + '</div></div>')
+            + '<div class="bv-diff">' + diff + '</div></div>')
     return _STYLE + '<div class="bv">' + body + "</div>"
 
 
