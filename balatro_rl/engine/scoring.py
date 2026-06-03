@@ -32,6 +32,7 @@ class ScoreResult:
     # enhancement produces them yet, so they are always 0 / () for the current game.
     money_delta: int = 0              # money gained during scoring (Lucky/Gold seal/Gold enh)
     destroyed_idx: tuple[int, ...] = ()  # indices into the PLAYED hand to destroy (Glass)
+    lucky_triggered: int = 0          # # Lucky cards that triggered this hand (Lucky Cat scaling)
 
 
 def _apply(ctx: ScoreContext, eff) -> None:
@@ -65,12 +66,20 @@ def _score_card_mods(ctx: ScoreContext, card: Card) -> None:
         # Two INDEPENDENT rolls: 1-in-5 -> +20 Mult, 1-in-15 -> +$20. Both consume
         # ctx.rng (mult roll first, then money roll), mirroring how Misprint/
         # Bloodstone reassign ctx.rng in place; the advanced rng threads back out.
+        triggered = False
         roll, ctx.rng = ctx.rng.random()
         if roll < 1 / 5:
             ctx.mult += 20
+            triggered = True
         roll, ctx.rng = ctx.rng.random()
         if roll < 1 / 15:
             ctx.money_delta += 20
+            triggered = True
+        # Lucky Cat scales per Lucky card that triggers; both rolls hitting still counts
+        # ONCE (wiki). Counted here (inside any retrigger loop) so each re-score that hits
+        # is its own event; surfaced on ScoreResult for the engine to persist.
+        if triggered:
+            ctx.lucky_triggers += 1
     # --- edition: additive (Foil/Holo) then multiplicative (Poly) ---
     ed = card.edition
     if ed == Edition.FOIL:
@@ -215,4 +224,5 @@ def score_play(played, jokers: tuple = (), held: tuple = (), *,
     return ScoreResult(score=int(ctx.chips * ctx.mult), hand_type=hand_type,
                        chips=ctx.chips, mult=ctx.mult, scoring_idx=tuple(scoring_idx),
                        rng=ctx.rng, money_delta=ctx.money_delta,
-                       destroyed_idx=tuple(ctx.destroyed_idx))
+                       destroyed_idx=tuple(ctx.destroyed_idx),
+                       lucky_triggered=ctx.lucky_triggers)

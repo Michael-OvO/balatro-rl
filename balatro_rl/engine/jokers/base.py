@@ -94,6 +94,9 @@ class JokerType(IntEnum):
     ROUGH_GEM = 116
     BUSINESS_CARD = 42
     RESERVED_PARKING = 82
+    # --- Batch 8 (B2b-i): event-scaling enhancement jokers ---
+    LUCKY_CAT = 91
+    GLASS_JOKER = 120
 
 
 class Rarity(IntEnum):
@@ -134,6 +137,16 @@ class JokerState:
     edition: int = 0      # 0 = base (editions are a later plan)
     counter: float = 0.0
     sell_bonus: int = 0   # extra sell value beyond floor(cost/2), e.g. from Egg
+
+
+@dataclasses.dataclass(frozen=True, slots=True)
+class HandEvents:
+    """Per-hand enhancement events surfaced from scoring to scaling jokers via
+    on_hand_events. All-zero on an unmodified hand, so the engine skips the fold and
+    the game stays byte-identical. `glass_destroyed` = Glass cards shattered this hand
+    (Glass Joker); `lucky_triggered` = Lucky cards that triggered (Lucky Cat)."""
+    glass_destroyed: int = 0
+    lucky_triggered: int = 0
 
 
 # Canonical all-zero full-deck enhancement histogram (indexed by Enhancement). Used as
@@ -190,6 +203,11 @@ class ScoreContext:
     # enhancements will accumulate here. destroyed_idx holds indices into `played`.
     money_delta: int = 0
     destroyed_idx: list = dataclasses.field(default_factory=list)
+    # Count of Lucky cards that SUCCESSFULLY triggered this hand (a card hitting both its
+    # money and mult rolls counts ONCE). Read same-hand by Lucky Cat's independent hook,
+    # and surfaced on ScoreResult so the engine can persist it via on_hand_events. Stays 0
+    # on any hand without a triggering Lucky card -> no behavior change off the mod path.
+    lucky_triggers: int = 0
 
 
 class JokerEffect:
@@ -225,6 +243,13 @@ class JokerEffect:
 
     def on_play(self, state, played, scoring_idx, rules, js: "JokerState") -> "JokerState":
         """Lifecycle after a hand is played; return updated JokerState (scaling)."""
+        return js
+
+    def on_hand_events(self, js: "JokerState", events: "HandEvents") -> "JokerState":
+        """Scaling lifecycle driven by this hand's enhancement EVENTS (Glass cards
+        shattered, Lucky cards triggered). Folded in engine.step AFTER on_play and only
+        when some event fired. Return the updated JokerState. Default no-op so jokers that
+        don't scale on enhancement events are unaffected."""
         return js
 
     def on_round_end(self, state, js: "JokerState", rng):

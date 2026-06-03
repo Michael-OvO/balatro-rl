@@ -18,7 +18,7 @@ from .blinds import required_score
 from .cards import Enhancement, standard_deck
 from .economy import blind_reward, interest, MONEY_PER_UNUSED_HAND
 from .hands import evaluate
-from .jokers.base import REGISTRY, aggregate_rules
+from .jokers.base import HandEvents, REGISTRY, aggregate_rules
 from .rng import RNG
 from .scoring import score_play
 from .shop import generate_offers, joker_cost, reroll_cost, sell_value, CARD_SLOTS
@@ -277,6 +277,13 @@ def step(state: GameState, action: tuple[Verb, tuple[int, ...]]) -> tuple[GameSt
         )
     else:
         new_jokers = state.jokers
+    # Scaling lifecycle from this hand's enhancement EVENTS (Glass shattered / Lucky
+    # triggered). Folded AFTER on_play, and only when an event actually fired, so an
+    # unmodified hand never touches a joker counter (byte-identical to pre-Batch-8).
+    if new_jokers and (res.destroyed_idx or res.lucky_triggered):
+        events = HandEvents(glass_destroyed=len(res.destroyed_idx),
+                            lucky_triggered=res.lucky_triggered)
+        new_jokers = tuple(REGISTRY[js.type].on_hand_events(js, events) for js in new_jokers)
     # Now (AFTER the joker on_play fold, which reads PRE-increment counts off `state`
     # for Obelisk) bump the per-HandType play counters for the hand just played.
     ht = int(res.hand_type)

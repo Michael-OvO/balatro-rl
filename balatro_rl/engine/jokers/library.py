@@ -773,3 +773,30 @@ class _ReservedParking(JokerEffect):  # wiki: /w/Reserved_Parking  — each held
             if roll < 0.5:
                 ctx.money_delta += 1
         return Effect()
+
+
+# --- Batch 8 (B2b-i): event-scaling enhancement jokers --------------------------
+# Both scale a per-instance X Mult counter from this hand's enhancement events
+# (HandEvents) via on_hand_events. Glass Joker scales on glass SHATTERS, which happen
+# after scoring -> independent reads the persistent counter only (next-hand). Lucky Cat
+# scales on lucky TRIGGERS, which fire in the scored-card phase (before the joker phase)
+# -> independent adds this hand's ctx.lucky_triggers so the same hand benefits.
+
+@register(JokerType.GLASS_JOKER)
+class _GlassJoker(JokerEffect):  # wiki: /w/Glass_Joker  — gains X0.75 Mult per Glass card destroyed
+    rarity = Rarity.UNCOMMON
+    cost = 6
+    def independent(self, ctx, js):
+        return Effect(xmult=1.0 + 0.75 * js.counter)
+    def on_hand_events(self, js, events):
+        return dataclasses.replace(js, counter=js.counter + events.glass_destroyed)
+
+
+@register(JokerType.LUCKY_CAT)
+class _LuckyCat(JokerEffect):  # wiki: /w/Lucky_Cat  — gains X0.25 Mult per Lucky card trigger
+    rarity = Rarity.UNCOMMON
+    cost = 6
+    def independent(self, ctx, js):
+        return Effect(xmult=1.0 + 0.25 * (js.counter + ctx.lucky_triggers))
+    def on_hand_events(self, js, events):
+        return dataclasses.replace(js, counter=js.counter + events.lucky_triggered)
