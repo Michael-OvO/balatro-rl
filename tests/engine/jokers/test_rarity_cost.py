@@ -31,6 +31,19 @@ def test_existing_jokers_declare_rarity_and_cost():
         assert eff.cost == cost, jt
 
 
+def test_batch4_jokers_declare_rarity_and_cost():
+    # wiki: /w/Faceless_Joker /w/Green_Joker /w/Ramen
+    expected = {
+        JokerType.FACELESS_JOKER: (Rarity.COMMON, 4),
+        JokerType.GREEN_JOKER: (Rarity.COMMON, 4),
+        JokerType.RAMEN: (Rarity.UNCOMMON, 6),
+    }
+    for jt, (rar, cost) in expected.items():
+        eff = REGISTRY[jt]
+        assert eff.rarity == rar, jt
+        assert eff.cost == cost, jt
+
+
 def test_batch1_jokers_declare_rarity_and_cost():
     # wiki: docs/reference/jokers.md
     expected = {

@@ -6,7 +6,10 @@ from __future__ import annotations
 import dataclasses
 
 from ..hands import HandType, contains, is_face
-from .base import Effect, JokerEffect, JokerState, JokerType, Rarity, RuleFlags, register
+from .base import (
+    Effect, JokerEffect, JokerState, JokerType, Rarity, RuleFlags,
+    NO_RULES, aggregate_rules, register,
+)
 
 
 @register(JokerType.JOKER)
@@ -539,3 +542,39 @@ class _DelayedGratification(JokerEffect):  # wiki: /w/Delayed_Gratification  —
         if state.discards_left == DISCARDS_PER_BLIND:
             return js, 2 * state.discards_left, False, rng
         return js, 0, False, rng
+
+
+# --- Batch 4: on_discard lifecycle jokers ---
+
+@register(JokerType.FACELESS_JOKER)
+class _FacelessJoker(JokerEffect):  # wiki: /w/Faceless_Joker  — earn $5 if 3+ face cards discarded at once
+    rarity = Rarity.COMMON
+    cost = 4
+    def on_discard(self, state, discarded, js, rng):
+        rules = aggregate_rules(state.jokers) if state and state.jokers else NO_RULES
+        faces = sum(1 for c in discarded if is_face(c, rules))
+        return js, (5 if faces >= 3 else 0), rng
+
+
+@register(JokerType.GREEN_JOKER)
+class _GreenJoker(JokerEffect):  # wiki: /w/Green_Joker  — +1 Mult per hand played, -1 per discard (start 0, floor 0)
+    rarity = Rarity.COMMON
+    cost = 4
+    def independent(self, ctx, js):
+        return Effect(mult=js.counter)
+    def on_play(self, state, played, scoring_idx, rules, js):
+        return dataclasses.replace(js, counter=js.counter + 1.0)
+    def on_discard(self, state, discarded, js, rng):
+        return dataclasses.replace(js, counter=max(0.0, js.counter - 1.0)), 0, rng
+
+
+@register(JokerType.RAMEN)
+class _Ramen(JokerEffect):  # wiki: /w/Ramen  — X2 Mult, -X0.01 per card discarded; eaten at 100 cards (would hit X1)
+    rarity = Rarity.UNCOMMON
+    cost = 6
+    def independent(self, ctx, js):
+        return Effect(xmult=2.0 - 0.01 * js.counter)
+    def on_discard(self, state, discarded, js, rng):
+        return dataclasses.replace(js, counter=js.counter + len(discarded)), 0, rng
+    def destroy_when(self, js):
+        return js.counter >= 100

@@ -71,6 +71,10 @@ class JokerType(IntEnum):
     BLACKBOARD = 48
     TO_THE_MOON = 84
     DELAYED_GRATIFICATION = 35
+    # --- Batch 4: on_discard lifecycle jokers ---
+    FACELESS_JOKER = 57
+    GREEN_JOKER = 58
+    RAMEN = 100
 
 
 class Rarity(IntEnum):
@@ -174,6 +178,18 @@ class JokerEffect:
         (updated JokerState, money_delta:int, destroy:bool, rng).
         rng is threaded for probabilistic effects (e.g. self-destroy)."""
         return js, 0, False, rng
+
+    def on_discard(self, state, discarded, js: "JokerState", rng):
+        """After cards are discarded (DISCARD action). `discarded` is the list of
+        Card just discarded. Returns (updated JokerState, money_delta:int, rng);
+        rng is threaded for probabilistic effects. Scaling counters persist via js."""
+        return js, 0, rng
+
+    def destroy_when(self, js: "JokerState") -> bool:
+        """Whether this joker should be removed given its current state (consulted
+        by the engine after lifecycle folds). Used by self-consuming scalers like
+        Ramen (eaten once its X Mult would fall to X1)."""
+        return False
 
 
 REGISTRY: dict[JokerType, JokerEffect] = {}

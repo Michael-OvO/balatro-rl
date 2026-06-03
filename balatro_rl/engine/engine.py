@@ -156,8 +156,19 @@ def step(state: GameState, action: tuple[Verb, tuple[int, ...]]) -> tuple[GameSt
     if verb == Verb.DISCARD:
         assert state.discards_left > 0, "no discards left"
         hand, deck = _draw(remaining, list(state.deck), state.hand_size)
+        # Lifecycle: fold every joker's on_discard (mirrors _cash_out / on_round_end):
+        # thread rng, accumulate money, persist scaling counters, drop self-consumers.
+        money = state.money
+        rng = state.rng
+        kept = []
+        for js in state.jokers:
+            js2, mdelta, rng = REGISTRY[js.type].on_discard(state, selected, js, rng)
+            money += mdelta
+            if not REGISTRY[js.type].destroy_when(js2):
+                kept.append(js2)
         nxt = dataclasses.replace(state, hand=tuple(hand), deck=tuple(deck),
-                                  discards_left=state.discards_left - 1)
+                                  discards_left=state.discards_left - 1,
+                                  money=money, jokers=tuple(kept), rng=rng)
         return nxt, {"verb": "discard", "discarded": len(idx)}
 
     # PLAY
