@@ -393,6 +393,29 @@ def step(state: GameState, action: tuple[Verb, tuple[int, ...]]) -> tuple[GameSt
     return nxt, info
 
 
+def explain_play(state: GameState, idx) -> dict:
+    """Re-run a PLAY's scoring WITH a breakdown trace, for the replay viewer. Uses the same
+    inputs (and state.rng) as engine.step would, so the score is byte-identical to the real
+    play and the trace faithfully explains it. Returns {trace, score, chips, mult, hand_type}.
+    The trace is an ordered list of running-total events (base -> cards -> jokers -> mods)."""
+    selected = [state.hand[i] for i in idx]
+    held = tuple(c for i, c in enumerate(state.hand) if i not in set(idx))
+    rules = aggregate_rules(state.jokers)
+    boss = BossEffect(state.boss)
+    debuffed = boss_debuffed_idx(boss, selected, rules) if state.boss else ()
+    trace: list = []
+    res = score_play(selected, jokers=state.jokers, held=held,
+                     joker_slots=JOKER_SLOTS, money=state.money,
+                     hands_left=state.hands_left, discards_left=state.discards_left,
+                     deck_count=len(state.deck),
+                     hand_plays_run=state.hand_plays_run, hand_plays_round=state.hand_plays_round,
+                     deck_enh_counts=_deck_enh_histogram(state.master_deck),
+                     debuffed_idx=debuffed, levels=state.levels,
+                     flint=boss_halves_base(boss), trace=trace, rng=state.rng)
+    return {"trace": trace, "score": res.score, "chips": res.chips,
+            "mult": float(res.mult), "hand_type": int(res.hand_type)}
+
+
 def _shop_step(state: GameState, action):
     verb = action[0]
     if verb == Verb.LEAVE_SHOP:

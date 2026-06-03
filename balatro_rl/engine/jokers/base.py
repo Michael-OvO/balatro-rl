@@ -211,6 +211,10 @@ class ScoreContext:
     # enhancements will accumulate here. destroyed_idx holds indices into `played`.
     money_delta: int = 0
     destroyed_idx: list = dataclasses.field(default_factory=list)
+    # Optional score-breakdown recorder for the replay viewer (None on the engine hot path
+    # -> zero overhead, byte-identical). When a list, scoring appends one running-total event
+    # {"label", "chips", "mult"} per contribution (base, card chips, each joker, each mod).
+    trace: list | None = None
     # Count of Lucky cards that SUCCESSFULLY triggered this hand (a card hitting both its
     # money and mult rolls counts ONCE). Read same-hand by Lucky Cat's independent hook,
     # and surfaced on ScoreResult so the engine can persist it via on_hand_events. Stays 0

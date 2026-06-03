@@ -12,8 +12,10 @@ import numpy as np
 
 from ..agent.value_head import value_decode
 from ..engine import engine
+from ..engine.bosses import BossEffect
 from ..engine.cards import card_str
-from ..engine.engine import Verb
+from ..engine.descriptions import boss_desc, consumable_desc, joker_desc
+from ..engine.engine import Verb, explain_play
 from ..engine.jokers.base import JokerType
 from ..engine.shop import joker_cost, sell_value
 from ..engine.state import GameState, Phase
@@ -32,8 +34,29 @@ def _card_d(c) -> dict:
 
 def _joker_d(j) -> dict:
     return {"type": int(j.type), "name": JokerType(j.type).name,
+            "desc": joker_desc(j.type),            # human-readable effect for the viewer
             "counter": float(j.counter), "edition": int(j.edition),
             "sell": sell_value(j.type, j.sell_bonus)}
+
+
+def _consum_d(con) -> dict:
+    return {"kind": int(con.kind), "type_id": int(con.type_id),
+            "name": _consum_name(con), "desc": consumable_desc(con.kind, con.type_id)}
+
+
+def _consum_name(con) -> str:
+    from ..engine.consumables import ConsumableKind, PlanetType
+    if con.kind == ConsumableKind.PLANET:
+        return PlanetType(con.type_id).name.title().replace("_", " ")
+    return f"{ConsumableKind(con.kind).name.title()} {con.type_id}"
+
+
+def _boss_d(state) -> dict:
+    """Active boss: name + effect text (empty when no boss on this blind)."""
+    if not state.boss:
+        return {}
+    b = BossEffect(state.boss)
+    return {"id": int(b), "name": b.name.replace("_", " ").title(), "desc": boss_desc(b)}
 
 
 def _offer_d(o) -> dict:
@@ -114,6 +137,9 @@ def record_agent_episode(net, params, seed: int, reward_name: str = "shaped",
         verb, arg = decode(a)
         selected = list(arg) if verb in (Verb.PLAY, Verb.DISCARD) else []
         board = render_board(state)            # text blob kept for old-style fallback
+        # Score breakdown for a PLAY: re-run scoring deterministically with a trace so the
+        # viewer can show the exact base -> cards -> jokers -> mods math for this hand.
+        score_trace = explain_play(state, tuple(arg))["trace"] if verb == Verb.PLAY else []
         obs, reward, done, info, mask = env.step(a)
         steps.append({
             "t": len(steps), "ante": int(state.ante), "blind": int(state.blind_index),
@@ -138,6 +164,10 @@ def record_agent_episode(net, params, seed: int, reward_name: str = "shaped",
                             if int(state.phase) == int(Phase.SHOP) else []),
             "hand_reset": bool(verb == Verb.LEAVE_SHOP),
             "earned": info.get("earned"),
+            # --- Phase D content for the enriched viewer ---
+            "boss": _boss_d(state),
+            "consumables": [_consum_d(c) for c in state.consumables],
+            "score_trace": score_trace,
         })
     if env.state.done:        # explicit terminal frame so the viewer ENDS on the outcome
         st = env.state        # (otherwise the last frame is the pre-action state, e.g. "hands 1")
@@ -153,6 +183,8 @@ def record_agent_episode(net, params, seed: int, reward_name: str = "shaped",
             "hands_left": int(st.hands_left), "discards_left": int(st.discards_left),
             "jokers": [_joker_d(j) for j in st.jokers], "shop_offers": [],
             "hand_reset": False, "earned": None,
+            "boss": _boss_d(st), "consumables": [_consum_d(c) for c in st.consumables],
+            "score_trace": [],
         })
     return steps
 
