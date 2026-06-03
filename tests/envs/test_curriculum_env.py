@@ -13,6 +13,16 @@ def test_balatro_env_applies_req_scale_at_reset():
     assert env.state.required == 300                          # next reset picks up the new scale
 
 
+def test_step_info_surfaces_ante_and_round_score():
+    import numpy as np
+    env = BalatroEnv()
+    _o, mask = env.reset(1)
+    a = int(np.flatnonzero(mask)[0])
+    _o, _r, _d, info, _m = env.step(a)
+    assert info["ante"] == env.state.ante           # depth reached (for train-time logging)
+    assert info["round_score"] == env.state.round_score
+
+
 def test_vec_env_set_req_scale_updates_every_subenv():
     ve = SyncVectorEnv(num_envs=4, req_scale=0.2)
     ve.reset()
