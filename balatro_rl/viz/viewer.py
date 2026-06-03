@@ -54,107 +54,146 @@ _VERB_STYLE = {"PLAY": ("v-play", "#2f7fe0", 22), "DISCARD": ("v-disc", "#6b7280
                "LEAVE_SHOP": ("v-shop", "#7c5cff", 14)}
 
 _STYLE = """<style>
-.bv{font-family:ui-sans-serif,system-ui,Arial;color:#e8e8ea}
-.bv-banner{display:flex;align-items:center;gap:14px;padding:11px 16px;border-radius:9px;
-  font-size:20px;font-weight:800;color:#fff !important;box-shadow:0 2px 8px rgba(0,0,0,.25)}
-.bv-banner .sub{font-size:14px;font-weight:600;opacity:.95}
-.v-play{background:#2f7fe0}.v-disc{background:#6b7280}.v-clear{background:#f59e0b}
-.v-buy{background:#8b5cf6}.v-sell{background:#b45309}.v-shop{background:#7c5cff}
-.v-win{background:#22a957}.v-loss{background:#d6453a}.v-other{background:#475569}
-.bv-prog-wrap{margin:9px 0 2px}
-.bv-prog-label{font-size:12px;font-weight:700;color:#9aa0b0;margin-bottom:3px}
-.bv-prog{height:16px;background:#27272a;border-radius:8px;overflow:hidden}
-.bv-prog-fill{height:100%;background:linear-gradient(90deg,#ffb02e,#ff6f3c)}
-.bv-prog-fill.done{background:#22a957}
-.bv-prog-num{font-size:11px;color:#9aa0b0;margin-top:2px}
-.bv-cols{display:flex;gap:16px;margin-top:11px}
-.bv-table{flex:3}.bv-diff{flex:2;background:#171a23;border-radius:9px;padding:9px 11px}
-.bv-sec{font-size:11px;font-weight:800;letter-spacing:.05em;color:#8b90a0;
-  text-transform:uppercase;margin:4px 0 6px}
-.bv-row{display:flex;gap:7px;flex-wrap:wrap;align-items:flex-end;min-height:84px}
-.card{position:relative;width:52px;height:72px;border-radius:7px;background:#fff;
-  border:1px solid #ccc;box-shadow:0 1px 3px rgba(0,0,0,.4);display:flex;
-  flex-direction:column;justify-content:space-between;padding:4px 6px;box-sizing:border-box}
-.card .r{font-size:14px;font-weight:800;line-height:1}
-.card .big{font-size:24px;text-align:center;line-height:1}
-.card .br{font-size:12px;font-weight:800;text-align:right;line-height:1}
-.red{color:#d6453a}.blk{color:#141414}
-.c-played{border:3px solid #2f7fe0;transform:translateY(-9px)}
-.c-disc{border:3px solid #6b7280;transform:translateY(-5px);opacity:.55}
-.c-new{border:3px solid #22a957;box-shadow:0 0 8px rgba(34,169,87,.55)}
-.c-left{filter:grayscale(1);border:2px dashed #888;opacity:.7}
+/* ===========================================================================
+   Balatro replay viewer — restrained dark theme, 8px rhythm, tabular numbers.
+   Palette: surfaces #0e0f13 / #171a21 / #222632, border #2c3140; text
+   #e8eaed / #9aa3b2 / #5b6373. Saturated colour reserved for meaning:
+   chips #4d9bff, mult #ff9d3c, positive #46cc78, negative #ef5f54, score #f0c44a.
+   Type scale: 11 / 13 / 15 / 20 / 28px. Weights 500 / 700 / 800.
+   =========================================================================== */
+.bv{font-family:ui-sans-serif,system-ui,-apple-system,"Segoe UI",Roboto,Arial,sans-serif;
+  color:#e8eaed;font-size:13px;line-height:1.45;font-variant-numeric:tabular-nums;
+  -webkit-font-smoothing:antialiased}
+.bv b{font-weight:700}
+/* --- header banner --- */
+.bv-banner{display:flex;align-items:center;gap:12px;padding:12px 16px;border-radius:10px;
+  font-size:20px;font-weight:800;color:#f4f5f7 !important;letter-spacing:-.01em;
+  background:#171a21;border:1px solid #2c3140;border-left:4px solid #5b6373}
+.bv-banner .sub{font-size:13px;font-weight:500;color:#b9bfca !important;letter-spacing:0}
+.bv-banner .sub b{font-weight:800;color:#f4f5f7 !important}
+.v-play{border-left-color:#4d9bff}.v-disc{border-left-color:#6b7280}
+.v-clear{border-left-color:#46cc78}.v-buy{border-left-color:#a78bfa}
+.v-sell{border-left-color:#ff9d3c}.v-shop{border-left-color:#a78bfa}
+.v-win{border-left-color:#46cc78;background:#11231a}
+.v-loss{border-left-color:#ef5f54;background:#241313}
+.v-other{border-left-color:#5b6373}
+/* --- progress --- */
+.bv-prog-wrap{margin:8px 0 0}
+.bv-prog-label{font-size:11px;font-weight:700;letter-spacing:.06em;text-transform:uppercase;
+  color:#9aa3b2;margin-bottom:5px}
+.bv-prog{height:8px;background:#171a21;border:1px solid #2c3140;border-radius:6px;overflow:hidden}
+.bv-prog-fill{height:100%;background:#ff9d3c;border-radius:6px 0 0 6px;transition:none}
+.bv-prog-fill.done{background:#46cc78}
+.bv-prog-num{font-size:12px;color:#9aa3b2;margin-top:6px}
+.bv-prog-num b{color:#e8eaed;font-weight:700}
+/* --- layout --- */
+.bv-cols{display:flex;gap:16px;margin-top:16px;align-items:flex-start}
+.bv-table{flex:3;min-width:0}.bv-diff{flex:2;min-width:0;display:flex;flex-direction:column;gap:14px}
+.bv-card{background:#171a21;border:1px solid #2c3140;border-radius:10px;padding:14px}
+.bv-table .bv-card{margin-bottom:14px}.bv-table .bv-card:last-child{margin-bottom:0}
+.bv-sec{font-size:11px;font-weight:700;letter-spacing:.07em;color:#9aa3b2;
+  text-transform:uppercase;margin:0 0 10px}
+.bv-sec .bv-sec-note{font-weight:500;letter-spacing:.02em;text-transform:none;color:#5b6373}
+.bv-row{display:flex;gap:8px;flex-wrap:wrap;align-items:flex-end;min-height:80px}
+/* --- cards --- */
+.card{position:relative;width:48px;height:68px;border-radius:8px;background:#f4f1e9;
+  border:1px solid #2c3140;display:flex;flex-direction:column;justify-content:space-between;
+  padding:5px 6px;box-sizing:border-box}
+.card .r{font-size:15px;font-weight:800;line-height:1}
+.card .big{font-size:22px;text-align:center;line-height:1}
+.card .br{font-size:11px;font-weight:800;text-align:right;line-height:1}
+.red{color:#d6453a}.blk{color:#1a1a1a}
+.c-played{border:2px solid #4d9bff;box-shadow:0 0 0 2px rgba(77,155,255,.25);transform:translateY(-8px)}
+.c-disc{border:2px solid #6b7280;transform:translateY(-4px);opacity:.5}
+.c-new{border:2px solid #46cc78;box-shadow:0 0 0 2px rgba(70,204,120,.25)}
+.c-left{filter:grayscale(1);border:1px dashed #5b6373;opacity:.55}
 .c-noscore{opacity:.4}
-.ribbon{position:absolute;top:-8px;left:50%;transform:translateX(-50%);font-size:8px;
-  font-weight:800;color:#fff;padding:1px 5px;border-radius:6px}
-.rb-play{background:#2f7fe0}.rb-disc{background:#6b7280}.rb-new{background:#22a957}
-.jokers{display:flex;gap:7px;margin-bottom:9px;flex-wrap:wrap}
-.jk{display:flex;flex-direction:column;gap:2px;max-width:200px;font-size:11px;font-weight:700;
-  background:#3a2d5c;color:#fff !important;padding:4px 9px;border-radius:7px;border:1px solid #4c3f7a}
-.jk .jk-name{font-weight:800}
-.jk .jk-cnt{color:#ffd66b !important;font-weight:800}
-.jk .jk-desc{font-size:10px;font-weight:500;line-height:1.25;color:#cbb9ff !important;
-  white-space:normal;opacity:.95}
-.jk.add{background:#15803d;border-color:#22a957}.jk.add .jk-desc{color:#bbf7d0 !important}
-.jk.rem{background:#7f1d1d;border-color:#b91c1c;opacity:.7}.jk.rem .jk-name{text-decoration:line-through}
-.shop{display:flex;gap:8px;flex-wrap:wrap;margin-top:6px}
-.offer{font-size:12px;font-weight:700;background:#2a2540;color:#cbb9ff;
-  padding:5px 9px;border-radius:7px;border:1px solid #4c3f7a}
-.offer.target{border:2px solid #f59e0b;color:#ffe2ad}
-.delta{display:flex;justify-content:space-between;font-size:13px;padding:2px 0;border-bottom:1px solid #262a36}
-.up{color:#22c55e !important;font-weight:800}.down{color:#ef6a5e !important;font-weight:800}.zero{color:#9aa0b0 !important}
-.note{font-size:12px;color:#9aa0b0;font-style:italic;padding:6px 0}
-.reel{display:flex;gap:2px;align-items:flex-end;height:38px;padding:6px 4px;
-  background:#0f1115;border-radius:8px;overflow-x:auto}
-.tk{width:8px;border-radius:2px;flex:0 0 auto}
-.tk.cur{box-shadow:0 0 0 2px #fff,0 0 6px currentColor;width:10px}
-.legend{font-size:11px;color:#9aa0b0;margin:4px 2px}
-.legend span{margin-right:8px}
+.ribbon{position:absolute;top:-7px;left:50%;transform:translateX(-50%);font-size:8px;
+  font-weight:800;letter-spacing:.04em;color:#fff;padding:1px 5px;border-radius:5px}
+.rb-play{background:#4d9bff}.rb-disc{background:#6b7280}.rb-new{background:#46cc78}
+/* --- jokers --- */
+.jokers{display:flex;gap:8px;flex-wrap:wrap}
+.jk{display:flex;flex-direction:column;gap:3px;max-width:208px;
+  background:#222632;color:#e8eaed !important;padding:8px 10px;border-radius:8px;
+  border:1px solid #2c3140}
+.jk .jk-name{font-size:12px;font-weight:800;letter-spacing:.01em}
+.jk .jk-cnt{display:inline-block;font-size:11px;font-weight:800;color:#f0c44a !important;
+  background:rgba(240,196,74,.12);padding:0 5px;border-radius:5px;margin-left:4px}
+.jk .jk-desc{font-size:11px;font-weight:500;line-height:1.35;color:#9aa3b2 !important;
+  white-space:normal}
+.jk.add{border-color:#46cc78;box-shadow:0 0 0 1px rgba(70,204,120,.35)}
+.jk.rem{opacity:.45}.jk.rem .jk-name{text-decoration:line-through;color:#9aa3b2 !important}
+/* --- shop offers --- */
+.shop{display:flex;gap:8px;flex-wrap:wrap}
+.offer{font-size:12px;font-weight:700;background:#222632;color:#e8eaed;
+  padding:7px 10px;border-radius:8px;border:1px solid #2c3140}
+.offer.target{border-color:#ff9d3c;color:#ffd9b0}
+/* --- deltas --- */
+.delta{display:flex;justify-content:space-between;align-items:baseline;font-size:13px;
+  padding:5px 0;border-bottom:1px solid #222632}
+.delta:last-child{border-bottom:none}
+.delta>span:first-child{color:#9aa3b2}
+.up{color:#46cc78 !important;font-weight:700}.down{color:#ef5f54 !important;font-weight:700}
+.zero{color:#5b6373 !important;font-weight:500}
+.note{font-size:12px;color:#9aa3b2;padding:4px 0}
+/* --- timeline reel --- */
+.reel{display:flex;gap:3px;align-items:flex-end;height:36px;padding:8px 10px;
+  background:#171a21;border:1px solid #2c3140;border-radius:10px;overflow-x:auto}
+.tk{width:7px;border-radius:3px;flex:0 0 auto;opacity:.7}
+.tk.cur{box-shadow:0 0 0 2px #0e0f13,0 0 0 3px #e8eaed;width:9px;opacity:1}
+.legend{font-size:11px;color:#9aa3b2;margin:8px 2px 0}
+.legend span{margin-right:10px}
+/* --- policy probs --- */
 .probs{font-size:12px}
-.pbar-row{display:flex;align-items:center;gap:8px;margin:3px 0}
-.pbar-lbl{width:160px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;color:#cbd0da}
-.pbar-lbl.chosen{font-weight:800;color:#fff}
-.pbar-track{flex:1;height:11px;background:#27272a;border-radius:6px;overflow:hidden}
-.pbar-fill{height:100%;background:#475569}
-.pbar-fill.chosen{background:#2f7fe0}
-.pbar-num{width:46px;text-align:right;color:#9aa0b0}
-.pre{white-space:pre;font-family:ui-monospace,Menlo,monospace;font-size:12px;
-  background:#0f1115;color:#d4d4d8;padding:10px;border-radius:8px;overflow-x:auto}
+.pbar-row{display:flex;align-items:center;gap:10px;margin:6px 0}
+.pbar-lbl{width:170px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;color:#9aa3b2}
+.pbar-lbl.chosen{font-weight:700;color:#e8eaed}
+.pbar-track{flex:1;height:8px;background:#171a21;border:1px solid #2c3140;border-radius:5px;overflow:hidden}
+.pbar-fill{height:100%;background:#5b6373;border-radius:5px}
+.pbar-fill.chosen{background:#4d9bff}
+.pbar-num{width:48px;text-align:right;color:#9aa3b2}
+.pre{white-space:pre;font-family:ui-monospace,Menlo,Consolas,monospace;font-size:12px;
+  background:#0e0f13;color:#9aa3b2;padding:14px;border-radius:10px;border:1px solid #2c3140;overflow-x:auto}
 /* --- boss banner --- */
-.boss{display:flex;align-items:center;gap:11px;margin:9px 0 2px;padding:9px 14px;border-radius:9px;
-  background:linear-gradient(90deg,#3b0d0d,#5a1620);border:1px solid #b91c1c;
-  box-shadow:0 2px 8px rgba(120,10,10,.35)}
-.boss .boss-ico{font-size:22px;line-height:1}
-.boss .boss-name{font-size:15px;font-weight:800;color:#ffb4ab !important}
-.boss .boss-desc{font-size:12px;font-weight:600;color:#fcd9d4 !important;opacity:.95}
+.boss{display:flex;align-items:center;gap:10px;margin:12px 0 0;padding:10px 14px;border-radius:10px;
+  background:#241313;border:1px solid #2c3140;border-left:4px solid #ef5f54}
+.boss .boss-ico{font-size:18px;line-height:1}
+.boss .boss-name{font-size:13px;font-weight:800;color:#f3a6a0 !important}
+.boss .boss-desc{font-size:12px;font-weight:500;color:#c9a8a4 !important}
 /* --- consumables panel --- */
-.consums{display:flex;gap:7px;margin-bottom:9px;flex-wrap:wrap}
-.con{display:flex;flex-direction:column;gap:2px;max-width:200px;font-size:11px;font-weight:700;
-  background:#12304a;color:#fff !important;padding:4px 9px;border-radius:7px;border:1px solid #2c6491}
-.con .con-name{font-weight:800;color:#bfe3ff !important}
-.con .con-desc{font-size:10px;font-weight:500;line-height:1.25;color:#9fc8e8 !important}
+.consums{display:flex;gap:8px;flex-wrap:wrap}
+.con{display:flex;flex-direction:column;gap:3px;max-width:208px;
+  background:#222632;color:#e8eaed !important;padding:8px 10px;border-radius:8px;
+  border:1px solid #2c3140}
+.con .con-name{font-size:12px;font-weight:800;color:#9fc8ef !important}
+.con .con-desc{font-size:11px;font-weight:500;line-height:1.35;color:#9aa3b2 !important}
 /* --- card modifier badges --- */
-.badges{position:absolute;bottom:-7px;left:50%;transform:translateX(-50%);display:flex;gap:2px;
-  flex-wrap:wrap;justify-content:center;max-width:74px}
-.badge{font-size:7px;font-weight:800;color:#fff !important;padding:1px 4px;border-radius:5px;
-  line-height:1.2;white-space:nowrap;box-shadow:0 1px 2px rgba(0,0,0,.4)}
-.bd-enh{background:#2563eb}.bd-ed{background:#9333ea}.bd-seal{background:#b45309}
-/* --- score-trace tally (the centerpiece) --- */
-.trace{background:#0f1115;border-radius:9px;padding:8px 11px;margin:9px 0 2px}
-.trace-row{display:grid;grid-template-columns:1fr auto auto;gap:8px;align-items:center;
-  padding:3px 0;border-bottom:1px solid #1d2130;font-size:12px}
+.badges{position:absolute;bottom:-6px;left:50%;transform:translateX(-50%);display:flex;gap:2px;
+  flex-wrap:wrap;justify-content:center;max-width:72px}
+.badge{font-size:7px;font-weight:700;letter-spacing:.02em;color:#fff !important;padding:1px 4px;
+  border-radius:4px;line-height:1.25;white-space:nowrap}
+.bd-enh{background:#3a6fbf}.bd-ed{background:#7c5c9e}.bd-seal{background:#b07a36}
+/* --- score-trace ledger (the centerpiece) --- */
+.trace{background:#0e0f13;border:1px solid #2c3140;border-radius:10px;padding:6px 14px}
+.trace-row{display:grid;grid-template-columns:1fr auto 96px;gap:10px;align-items:center;
+  padding:6px 0;border-bottom:1px solid #1a1d26;font-size:13px}
 .trace-row:last-child{border-bottom:none}
-.trace-lbl{color:#cbd0da;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
-.trace-run{font-family:ui-monospace,Menlo,monospace;color:#e8e8ea;text-align:right;white-space:nowrap}
-.trace-run .chips{color:#5ea0ff !important;font-weight:700}
-.trace-run .mult{color:#ff6f3c !important;font-weight:700}
-.trace-delta{font-size:11px;font-weight:800;text-align:right;min-width:78px;white-space:nowrap}
-.trace-delta.chip{color:#5ea0ff !important}.trace-delta.mlt{color:#ff6f3c !important}
-.trace-delta.xmlt{color:#f59e0b !important}.trace-delta.none{color:#5b6072 !important}
-.trace-row.base .trace-lbl{font-weight:700;color:#9aa0b0}
-.trace-row.final{border-top:2px solid #2f7fe0;margin-top:2px;padding-top:6px;font-size:14px;font-weight:800}
-.trace-row.final .trace-lbl{color:#fff;font-weight:800}
-.trace-row.final .trace-run{color:#fff;font-weight:800}
-.trace-row.final .score{color:#ffd66b !important}
+.trace-lbl{color:#9aa3b2;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.trace-run{color:#e8eaed;text-align:right;white-space:nowrap;font-weight:700;font-variant-numeric:tabular-nums}
+.trace-run .chips{color:#4d9bff !important;font-weight:800}
+.trace-run .mult{color:#ff9d3c !important;font-weight:800}
+.trace-run .x{color:#5b6373;font-weight:500;padding:0 2px}
+.trace-delta{font-size:11px;font-weight:700;text-align:right;white-space:nowrap}
+.trace-delta.chip{color:#4d9bff !important}.trace-delta.mlt{color:#ff9d3c !important}
+.trace-delta.xmlt{color:#f0c44a !important}.trace-delta.none{color:#5b6373 !important;font-weight:500}
+.trace-row.base .trace-lbl{font-weight:700;color:#e8eaed}
+.trace-row.final{border-top:1px solid #2c3140;border-bottom:none;margin-top:2px;padding-top:9px;
+  font-size:15px}
+.trace-row.final .trace-lbl{color:#9aa3b2;font-weight:700;font-size:11px;letter-spacing:.06em;
+  text-transform:uppercase}
+.trace-row.final .trace-run{color:#e8eaed;font-weight:800;font-size:18px}
+.trace-row.final .trace-run .x{padding:0 6px}
+.trace-row.final .score{color:#f0c44a !important;font-size:24px;font-weight:800;margin-left:2px}
 </style>"""
 
 
@@ -202,7 +241,7 @@ def card_html(card: dict, *, state: str = "held", small: bool = False) -> str:
     rib = {"played": '<span class="ribbon rb-play">PLAY</span>',
            "disc": '<span class="ribbon rb-disc">DISC</span>',
            "new": '<span class="ribbon rb-new">NEW</span>'}.get(state, "")
-    cstyle = "background:#fff !important" + (";width:40px;height:56px" if small else "")
+    cstyle = "background:#f4f1e9 !important" + (";width:40px;height:56px" if small else "")
     tcol = f"color:{hexc} !important"
     return (f'<div class="card{cls}" style="{cstyle}">{rib}'
             f'<div class="r {col}" style="{tcol}">{r}</div>'
@@ -312,7 +351,8 @@ def _jokers_html(cur, prev):
         chips.append(f'<span class="jk rem"><span class="jk-name">{html.escape(name)}</span></span>')
     if not chips:
         chips = ['<span class="jk" style="opacity:.5"><span class="jk-name">no jokers</span></span>']
-    return '<div class="bv-sec">Jokers</div><div class="jokers">' + "".join(chips) + "</div>"
+    return ('<div class="bv-card"><div class="bv-sec">Jokers</div>'
+            '<div class="jokers">' + "".join(chips) + "</div></div>")
 
 
 def _boss_banner(s):
@@ -341,12 +381,13 @@ def _consumables_html(s):
         desc_html = f'<span class="con-desc">{html.escape(desc)}</span>' if desc else ""
         chips.append(f'<span class="con"><span class="con-name">{html.escape(c.get("name", "?"))}'
                      f'</span>{desc_html}</span>')
-    return '<div class="bv-sec">Consumables</div><div class="consums">' + "".join(chips) + "</div>"
+    return ('<div class="bv-card"><div class="bv-sec">Consumables</div>'
+            '<div class="consums">' + "".join(chips) + "</div></div>")
 
 
 def _run_cell(chips, mult):
     """The running 'chips × mult' cell, with chips and mult colour-coded."""
-    return (f'<span class="chips">{chips:g}</span> &times; '
+    return (f'<span class="chips">{chips:g}</span><span class="x">&times;</span>'
             f'<span class="mult">{mult:g}</span>')
 
 
@@ -396,12 +437,12 @@ def _score_trace_html(step):
     fchips, fmult = last.get("chips", 0), last.get("mult", 0)
     final = int(round(fchips * fmult))
     rows.append('<div class="trace-row final">'
-                '<span class="trace-lbl">final</span>'
-                f'<span class="trace-run">{_run_cell(fchips, fmult)} = '
+                '<span class="trace-lbl">score</span>'
+                f'<span class="trace-run">{_run_cell(fchips, fmult)}<span class="x">= </span>'
                 f'<span class="score">{final}</span></span>'
                 '<span class="trace-delta none"></span></div>')
-    return ('<div class="bv-sec">Score breakdown</div>'
-            '<div class="trace">' + "".join(rows) + "</div>")
+    return ('<div class="bv-card"><div class="bv-sec">Score breakdown</div>'
+            '<div class="trace">' + "".join(rows) + "</div></div>")
 
 
 def _hand_html(s):
@@ -419,10 +460,11 @@ def _hand_html(s):
             tiles.append(card_html(c, state="disc"))
         else:
             tiles.append(card_html(c, state="held"))
-    cap = ("this step PLAYs the highlighted cards" if verb == "PLAY" else
-           "this step DISCARDs the highlighted cards" if verb == "DISCARD" else "current hand")
-    return (f'<div class="bv-sec">Hand &middot; {cap}</div>'
-            f'<div class="bv-row">' + "".join(tiles) + "</div>")
+    cap = ("playing the highlighted cards" if verb == "PLAY" else
+           "discarding the highlighted cards" if verb == "DISCARD" else "current hand")
+    return (f'<div class="bv-card"><div class="bv-sec">Hand'
+            f' <span class="bv-sec-note">{cap}</span></div>'
+            f'<div class="bv-row">' + "".join(tiles) + "</div></div>")
 
 
 def _shop_html(s):
@@ -430,7 +472,8 @@ def _shop_html(s):
     if not offers:
         return ""
     chips = "".join(f'<span class="offer">{html.escape(o["name"])} ${o["cost"]}</span>' for o in offers)
-    return '<div class="bv-sec">Shop offers</div><div class="shop">' + chips + "</div>"
+    return ('<div class="bv-card"><div class="bv-sec">Shop offers</div>'
+            '<div class="shop">' + chips + "</div></div>")
 
 
 def _diff_panel(cur, prev):
@@ -461,7 +504,7 @@ def _diff_panel(cur, prev):
     if r is not None:
         rc = "up" if r > 0 else ("down" if r < 0 else "zero")
         blocks.append(f'<div class="delta"><span>reward</span><span class="{rc}">{r:+.3f}</span></div>')
-    return "".join(blocks)
+    return '<div class="bv-card">' + "".join(blocks) + "</div>"
 
 
 def render_focus(step_index: int, steps: list[dict]) -> str:
@@ -477,8 +520,9 @@ def render_focus(step_index: int, steps: list[dict]) -> str:
                 f'</span><span class="sub">reward {s["reward"]:+.3f} &middot; '
                 f'value {s["value"]:.1f}</span></div>')
         return (_STYLE + '<div class="bv">' + head
+                + '<div class="bv-card" style="margin-top:16px">'
                 + '<div class="bv-sec">Board (legacy episode)</div>'
-                + f'<div class="pre">{html.escape(s["board"])}</div></div>')
+                + f'<div class="pre">{html.escape(s["board"])}</div></div></div>')
     in_shop = s.get("phase") == "SHOP" or bool(s.get("shop_offers"))
     table = (_jokers_html(s, prev) + _consumables_html(s)
              + (_shop_html(s) if in_shop else _hand_html(s)))
