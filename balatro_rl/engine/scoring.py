@@ -14,7 +14,7 @@ import dataclasses
 from .cards import Card, Edition, Enhancement, Seal, is_stone, rank_chip_value
 from .hands import HAND_BASE, HandType, contains, evaluate, is_face
 from .jokers.base import (
-    NO_RULES, ScoreContext, aggregate_rules, resolve_providers,
+    DECK_ENH_ZEROS, NO_RULES, ScoreContext, aggregate_rules, resolve_providers,
 )
 from .rng import RNG
 
@@ -93,7 +93,8 @@ def score_play(played, jokers: tuple = (), held: tuple = (), *,
                joker_slots: int = 5, money: int = 0, hands_left: int = 0,
                discards_left: int = 0, deck_count: int = 0,
                hand_plays_run: tuple = (), hand_plays_round: tuple = (),
-               debuffed_idx: tuple = (), rng=None) -> ScoreResult:
+               deck_enh_counts: tuple = (), debuffed_idx: tuple = (),
+               rng=None) -> ScoreResult:
     """Score one played hand.
 
     The keyword-only scalars carry read-only game-state info to state-reading
@@ -104,6 +105,11 @@ def score_play(played, jokers: tuple = (), held: tuple = (), *,
     tuples (PRE-increment of THIS hand). score_play indexes them by the hand type it
     evaluates and exposes the current-hand count on ScoreContext for Supernova /
     Card Sharp. Empty tuples (default) read as 0 so pure-scoring callers still work.
+
+    `deck_enh_counts` is the full-deck enhancement histogram (counts per Enhancement
+    over GameState.master_deck) for jokers that scale off owned enhanced cards (Steel
+    Joker X Mult per Steel, Stone Joker +Chips per Stone). Empty (default) normalizes to
+    all-zeros on the context, so pure-scoring callers still construct.
 
     `rng` feeds probabilistic scoring jokers (Misprint, Bloodstone) AND probabilistic
     card mods (Lucky's two rolls, Glass's shatter roll). Hooks consume it by reassigning
@@ -151,7 +157,9 @@ def score_play(played, jokers: tuple = (), held: tuple = (), *,
                        money=money, hands_left=hands_left,
                        discards_left=discards_left, deck_count=deck_count,
                        hand_plays_run=plays_run, hand_plays_round=plays_round,
-                       hand_plays_run_max_other=plays_run_max_other, rng=rng)
+                       hand_plays_run_max_other=plays_run_max_other,
+                       deck_enh_counts=tuple(deck_enh_counts) or DECK_ENH_ZEROS,
+                       rng=rng)
     ctx.first_face_idx = next((i for i in scoring_idx if is_face(played[i], rules)), None)
     providers = resolve_providers(jokers)
 

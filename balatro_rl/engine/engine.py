@@ -81,6 +81,17 @@ def make_master_deck(card_mods=None) -> tuple:
     return tuple(deck)
 
 
+def _deck_enh_histogram(master_deck) -> tuple:
+    """Count cards by Enhancement across the full owned deck (indexed by Enhancement),
+    for deck-reading jokers (Steel/Stone Joker). An all-NONE deck yields a tuple that is
+    all-zeros except index 0 -- which those jokers ignore -- so it's a no-op on the
+    unmodified game."""
+    counts = [0] * len(Enhancement)
+    for c in master_deck:
+        counts[c.enhancement] += 1
+    return tuple(counts)
+
+
 def reset(seed: int, scale: float = 1.0, card_mods=None) -> GameState:
     rng = RNG.from_seed(seed)
     # The persistent master deck (cards + their mod fields) is the canonical
@@ -238,6 +249,7 @@ def step(state: GameState, action: tuple[Verb, tuple[int, ...]]) -> tuple[GameSt
                      deck_count=len(state.deck),
                      hand_plays_run=state.hand_plays_run,
                      hand_plays_round=state.hand_plays_round,
+                     deck_enh_counts=_deck_enh_histogram(state.master_deck),
                      debuffed_idx=(), rng=state.rng)
     # Probabilistic scoring jokers (Misprint, Bloodstone) consumed state.rng; the
     # advanced rng rides back on res.rng and MUST be written into every successor

@@ -5,6 +5,7 @@ from __future__ import annotations
 
 import dataclasses
 
+from ..cards import Enhancement
 from ..hands import HandType, contains, evaluate, is_face
 from .base import (
     Effect, JokerEffect, JokerState, JokerType, Rarity, RuleFlags,
@@ -706,3 +707,69 @@ class _Obelisk(JokerEffect):  # wiki: /w/Obelisk
         max_other = max((c for i, c in enumerate(runs) if i != ht), default=0)
         counter = self._next_counter(js.counter, self_pre, max_other)
         return dataclasses.replace(js, counter=counter)
+
+
+# --- Batch 7 (B2a): full-deck-enhancement readers + economy-on-score ------------
+# Money jokers add to ctx.money_delta directly (Effect has no money channel; this
+# mirrors the Lucky enhancement and Bloodstone's in-place ctx mutation). Business
+# Card / Reserved Parking consume ctx.rng ONLY for face cards, so a joker-absent or
+# face-less hand draws zero extra rng -> byte-identical to the pre-Batch-7 game.
+
+@register(JokerType.STEEL_JOKER)
+class _SteelJoker(JokerEffect):  # wiki: /w/Steel_Joker  — X Mult: +0.2 per Steel card in full deck
+    rarity = Rarity.UNCOMMON
+    cost = 7
+    def independent(self, ctx, js):
+        return Effect(xmult=1.0 + 0.2 * ctx.deck_enh_counts[Enhancement.STEEL])
+
+
+@register(JokerType.STONE_JOKER)
+class _StoneJoker(JokerEffect):  # wiki: /w/Stone_Joker  — +25 Chips per Stone card in full deck
+    rarity = Rarity.UNCOMMON
+    cost = 6
+    def independent(self, ctx, js):
+        return Effect(chips=25 * ctx.deck_enh_counts[Enhancement.STONE])
+
+
+@register(JokerType.GOLDEN_TICKET)
+class _GoldenTicket(JokerEffect):  # wiki: /w/Golden_Ticket  — played Gold-enhancement card earns $4
+    rarity = Rarity.COMMON
+    cost = 5
+    def on_score(self, ctx, card, index, js):
+        if card.enhancement == Enhancement.GOLD:
+            ctx.money_delta += 4
+        return Effect()
+
+
+@register(JokerType.ROUGH_GEM)
+class _RoughGem(JokerEffect):  # wiki: /w/Rough_Gem  — played Diamond earns $1
+    rarity = Rarity.UNCOMMON
+    cost = 7
+    def on_score(self, ctx, card, index, js):
+        if card.suit == 3:  # Diamonds
+            ctx.money_delta += 1
+        return Effect()
+
+
+@register(JokerType.BUSINESS_CARD)
+class _BusinessCard(JokerEffect):  # wiki: /w/Business_Card  — played face card has 1 in 2 to earn $2
+    rarity = Rarity.COMMON
+    cost = 4
+    def on_score(self, ctx, card, index, js):
+        if is_face(card, ctx.rules):  # respects Pareidolia via ctx.rules
+            roll, ctx.rng = ctx.rng.random()
+            if roll < 0.5:
+                ctx.money_delta += 2
+        return Effect()
+
+
+@register(JokerType.RESERVED_PARKING)
+class _ReservedParking(JokerEffect):  # wiki: /w/Reserved_Parking  — each held face card has 1 in 2 to earn $1
+    rarity = Rarity.COMMON
+    cost = 6
+    def on_held(self, ctx, card, js):
+        if is_face(card, ctx.rules):  # respects Pareidolia via ctx.rules
+            roll, ctx.rng = ctx.rng.random()
+            if roll < 0.5:
+                ctx.money_delta += 1
+        return Effect()

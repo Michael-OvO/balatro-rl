@@ -7,6 +7,8 @@ from __future__ import annotations
 import dataclasses
 from enum import IntEnum
 
+from ..cards import Enhancement
+
 
 class JokerType(IntEnum):
     JOKER = 1
@@ -85,6 +87,13 @@ class JokerType(IntEnum):
     SUPERNOVA = 43
     CARD_SHARP = 62
     OBELISK = 75
+    # --- Batch 7 (B2a): full-deck-enhancement readers + economy-on-score ---
+    STEEL_JOKER = 32
+    STONE_JOKER = 89
+    GOLDEN_TICKET = 106
+    ROUGH_GEM = 116
+    BUSINESS_CARD = 42
+    RESERVED_PARKING = 82
 
 
 class Rarity(IntEnum):
@@ -127,6 +136,12 @@ class JokerState:
     sell_bonus: int = 0   # extra sell value beyond floor(cost/2), e.g. from Egg
 
 
+# Canonical all-zero full-deck enhancement histogram (indexed by Enhancement). Used as
+# the ScoreContext default and as score_play's normalizer so deck-reading jokers (Steel
+# Joker, Stone Joker) always see a full-length tuple even when the caller omits counts.
+DECK_ENH_ZEROS: tuple = tuple([0] * len(Enhancement))
+
+
 @dataclasses.dataclass(slots=True)
 class ScoreContext:
     """Mutable scratch used only during one hand's scoring (never stored in state).
@@ -152,6 +167,10 @@ class ScoreContext:
     hands_left: int = 0         # hands remaining this blind
     discards_left: int = 0      # discards remaining this blind
     deck_count: int = 0         # cards left in the draw pile
+    # Full-deck enhancement histogram (counts per Enhancement value over master_deck),
+    # for jokers that scale off owned enhanced cards (Steel Joker, Stone Joker). Defaults
+    # to all-zeros so contexts built without state still construct (and read 0 of each).
+    deck_enh_counts: tuple = DECK_ENH_ZEROS
     # Times the CURRENT hand_type has been played, PRE-increment of this play
     # (i.e. NOT counting the hand being scored). Supernova adds +1 to include the
     # current play; Card Sharp fires when hand_plays_round >= 1 (already this round).
