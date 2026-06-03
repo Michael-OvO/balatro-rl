@@ -14,7 +14,7 @@ from __future__ import annotations
 import dataclasses
 from enum import IntEnum
 
-from .hands import is_face
+from .hands import evaluate, is_face
 
 
 class BossEffect(IntEnum):
@@ -139,6 +139,45 @@ def boss_debuffed_idx(boss: BossEffect, played, rules) -> tuple:
 def boss_halves_base(boss: BossEffect) -> bool:
     """The Flint halves the played hand's base Chips and Mult (rounded up in score_play)."""
     return boss == BossEffect.THE_FLINT
+
+
+# --- blind-setup + legal-mask effects (Phase C2) ---------------------------------
+
+def boss_hand_size_delta(boss: BossEffect) -> int:
+    """Change to the blind's hand size (The Manacle: -1)."""
+    return -1 if boss == BossEffect.THE_MANACLE else 0
+
+
+def boss_hands_left(boss: BossEffect, default: int) -> int:
+    """Hands available this blind (The Needle: 1)."""
+    return 1 if boss == BossEffect.THE_NEEDLE else default
+
+
+def boss_discards_left(boss: BossEffect, default: int) -> int:
+    """Discards available this blind (The Water: 0)."""
+    return 0 if boss == BossEffect.THE_WATER else default
+
+
+def boss_filters_plays(boss: BossEffect) -> bool:
+    """Whether the boss restricts which PLAY actions are legal (Psychic/Eye/Mouth). Lets
+    legal_actions skip the per-combo hand evaluation entirely off these blinds."""
+    return boss in (BossEffect.THE_PSYCHIC, BossEffect.THE_EYE, BossEffect.THE_MOUTH)
+
+
+def boss_allows_play(boss: BossEffect, combo_cards, hand_plays_round, rules) -> bool:
+    """Whether a PLAY of `combo_cards` is legal under the boss. The Psychic requires
+    exactly 5 cards. The Eye forbids a hand type already played this round; The Mouth
+    allows only the round's first-played type (any type if none played yet). Both read
+    hand_plays_round (per-HandType counts this round). Non-filtering bosses allow all."""
+    if boss == BossEffect.THE_PSYCHIC:
+        return len(combo_cards) == 5
+    if boss in (BossEffect.THE_EYE, BossEffect.THE_MOUTH):
+        ht = int(evaluate(list(combo_cards), rules)[0])
+        played = hand_plays_round[ht] if ht < len(hand_plays_round) else 0
+        if boss == BossEffect.THE_EYE:
+            return played == 0                      # no repeats this round
+        return sum(hand_plays_round) == 0 or played > 0   # Mouth: locked to the first type
+    return True
 
 
 def select_boss(rng, ante: int):

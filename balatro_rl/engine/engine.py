@@ -15,7 +15,11 @@ import itertools
 from enum import IntEnum
 
 from .blinds import required_score
-from .bosses import BossEffect, boss_debuffed_idx, boss_halves_base, select_boss
+from .bosses import (
+    BossEffect, boss_allows_play, boss_debuffed_idx, boss_discards_left,
+    boss_filters_plays, boss_halves_base, boss_hand_size_delta, boss_hands_left,
+    select_boss,
+)
 from .cards import Enhancement, standard_deck
 from .economy import blind_reward, interest, MONEY_PER_UNUSED_HAND
 from .hands import evaluate
@@ -143,9 +147,17 @@ def legal_actions(state: GameState) -> list[tuple[Verb, tuple[int, ...]]]:
         return actions
     actions: list[tuple[Verb, tuple[int, ...]]] = []
     n = len(state.hand)
+    # Boss PLAY restrictions (Psychic exactly-5 / Eye no-repeat / Mouth single-type). Only
+    # engaged on those boss blinds; off them `play_filter` is False and the loop is the
+    # original (byte-identical action space for the default game).
+    boss = BossEffect(state.boss)
+    play_filter = boss_filters_plays(boss)
+    rules = aggregate_rules(state.jokers) if boss in (BossEffect.THE_EYE, BossEffect.THE_MOUTH) \
+        else NO_RULES
     for size in range(1, min(MAX_SELECT, n) + 1):
         for combo in itertools.combinations(range(n), size):
-            if state.hands_left > 0:
+            if state.hands_left > 0 and (not play_filter or boss_allows_play(
+                    boss, [state.hand[i] for i in combo], state.hand_plays_round, rules)):
                 actions.append((Verb.PLAY, combo))
             if state.discards_left > 0:
                 actions.append((Verb.DISCARD, combo))
@@ -157,25 +169,31 @@ def _advance_blind(state: GameState):
         new_ante, new_blind = state.ante, state.blind_index + 1
     else:
         new_ante, new_blind = state.ante + 1, 0
-    # Reshuffle the working deck FROM the persistent master deck so any card mods
-    # (enhancement/edition/seal) ride forward across the blind boundary. With an
-    # unmodified deck this is byte-identical to the old shuffle(standard_deck()).
-    deck, rng = state.rng.shuffle(list(state.master_deck))
-    hand, deck = _draw([], deck, state.hand_size)
-    # Start-of-blind fold: re-roll per-round joker targets (Ancient Joker, The Idol,
-    # Mail-In Rebate), threading the rng so each round's pick is seed-deterministic.
-    jokers, rng = _start_round(state, state.jokers, rng)
+    rng = state.rng
     # Boss selection: only on the boss blind AND only when enabled. Disabled -> NONE and
-    # ZERO rng drawn here, so the deterministic stream (and every existing replay) is
-    # untouched. The boss's score-requirement multiplier (Wall 4x / Needle 1x / ...) feeds
-    # required_score; its other effects arrive in later sub-phases.
+    # ZERO rng drawn, so the deterministic stream (and every existing replay) is untouched.
+    # Selected BEFORE the deal so The Manacle's -1 hand size applies to the draw.
     boss = BossEffect.NONE
     if new_blind == 2 and state.bosses_enabled:
         boss, rng = select_boss(rng, new_ante)
+    # Boss blind-setup: hand size (Manacle), hands (Needle), discards (Water). Recomputed
+    # fresh from the HAND_SIZE base each blind, so a boss's reduction never compounds and
+    # resets on the next blind. All identity for boss == NONE -> byte-identical.
+    hand_size = HAND_SIZE + boss_hand_size_delta(boss)
+    # Reshuffle the working deck FROM the persistent master deck so any card mods
+    # (enhancement/edition/seal) ride forward across the blind boundary. With an
+    # unmodified deck this is byte-identical to the old shuffle(standard_deck()).
+    deck, rng = rng.shuffle(list(state.master_deck))
+    hand, deck = _draw([], deck, hand_size)
+    # Start-of-blind fold: re-roll per-round joker targets (Ancient Joker, The Idol,
+    # Mail-In Rebate), threading the rng so each round's pick is seed-deterministic.
+    jokers, rng = _start_round(state, state.jokers, rng)
     nxt = dataclasses.replace(
         state, ante=new_ante, blind_index=new_blind, deck=tuple(deck), hand=tuple(hand),
         round_score=0, required=required_score(new_ante, new_blind, state.req_scale, boss),
-        hands_left=HANDS_PER_BLIND, discards_left=DISCARDS_PER_BLIND, rng=rng,
+        hand_size=hand_size,
+        hands_left=boss_hands_left(boss, HANDS_PER_BLIND),
+        discards_left=boss_discards_left(boss, DISCARDS_PER_BLIND), rng=rng,
         hand_plays_round=tuple([0] * 12),  # per-round counter resets each blind
         boss=int(boss),
         jokers=jokers, phase=Phase.PLAYING, shop_offers=(), rerolls_done=0, shop_steps=0)
