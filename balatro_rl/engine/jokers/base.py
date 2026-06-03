@@ -166,6 +166,11 @@ class ScoreContext:
     # out to GameState so a fixed seed reproduces every roll. Defaults to a fixed seed
     # so contexts built without state still construct (and roll deterministically).
     rng: object = None
+    # Side-effect accumulators threaded out on ScoreResult and applied by the engine.
+    # No current hook touches them (always 0 / empty now); Phase B's Lucky/Gold/Glass
+    # enhancements will accumulate here. destroyed_idx holds indices into `played`.
+    money_delta: int = 0
+    destroyed_idx: list = dataclasses.field(default_factory=list)
 
 
 class JokerEffect:

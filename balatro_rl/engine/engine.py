@@ -64,7 +64,12 @@ def _start_round(state, jokers: tuple, rng):
 
 def reset(seed: int, scale: float = 1.0) -> GameState:
     rng = RNG.from_seed(seed)
-    deck, rng = rng.shuffle(standard_deck())
+    # The persistent master deck (cards + their mod fields) is the canonical
+    # owned-card set. We shuffle the WORKING deck FROM a copy of it. With an
+    # unmodified standard_deck() this is byte-identical to the old
+    # `rng.shuffle(standard_deck())` (same order in, same rng, same result).
+    master_deck = tuple(standard_deck())
+    deck, rng = rng.shuffle(list(master_deck))
     hand, deck = _draw([], deck, HAND_SIZE)
     # Start-of-blind fold (jokers is empty at reset, so this is a no-op now, but it
     # keeps reset and _advance_blind symmetric for any future starting jokers).
@@ -78,6 +83,7 @@ def reset(seed: int, scale: float = 1.0) -> GameState:
         money=STARTING_MONEY,
         rng=rng, phase=Phase.PLAYING, done=False, won=False, jokers=jokers,
         shop_offers=(), rerolls_done=0, req_scale=scale,
+        master_deck=master_deck,
     )
 
 
@@ -117,7 +123,10 @@ def _advance_blind(state: GameState):
         new_ante, new_blind = state.ante, state.blind_index + 1
     else:
         new_ante, new_blind = state.ante + 1, 0
-    deck, rng = state.rng.shuffle(standard_deck())
+    # Reshuffle the working deck FROM the persistent master deck so any card mods
+    # (enhancement/edition/seal) ride forward across the blind boundary. With an
+    # unmodified deck this is byte-identical to the old shuffle(standard_deck()).
+    deck, rng = state.rng.shuffle(list(state.master_deck))
     hand, deck = _draw([], deck, state.hand_size)
     # Start-of-blind fold: re-roll per-round joker targets (Ancient Joker, The Idol,
     # Mail-In Rebate), threading the rng so each round's pick is seed-deterministic.
@@ -205,6 +214,18 @@ def step(state: GameState, action: tuple[Verb, tuple[int, ...]]) -> tuple[GameSt
     # advanced rng rides back on res.rng and MUST be written into every successor
     # state below so a fixed seed reproduces the same rolls deterministically.
     rng = res.rng
+    # Apply scoring side effects threaded out on the ScoreResult (mirrors res.rng).
+    # money_delta: Lucky/Gold-seal/Gold-enhancement money won during scoring.
+    # destroyed_idx: PLAYED-card indices to destroy (Glass) -> drop the matching
+    # objects from the persistent master_deck by identity (played cards ARE the
+    # same Card objects as their master_deck entries; see reset/_advance_blind).
+    # Both are always 0 / empty for the current game (no hook produces them), so
+    # this block is a behavioral no-op until Phase B populates them.
+    money = state.money + res.money_delta
+    master_deck = state.master_deck
+    if res.destroyed_idx:
+        destroyed = {id(selected[i]) for i in res.destroyed_idx}
+        master_deck = tuple(c for c in master_deck if id(c) not in destroyed)
     # Lifecycle: let scaling jokers (e.g. Ride the Bus) update from this hand.
     rules = aggregate_rules(state.jokers) if state.jokers else None
     if state.jokers:
@@ -229,7 +250,8 @@ def step(state: GameState, action: tuple[Verb, tuple[int, ...]]) -> tuple[GameSt
         # Blind cleared: cash out then enter the shop (or win at the Ante-8 boss);
         # _advance_blind on shop-leave reshuffles a fresh deck and redraws.
         carried = dataclasses.replace(state, jokers=new_jokers, round_score=round_score,
-                                      hands_left=hands_left, rng=rng,
+                                      hands_left=hands_left, rng=rng, money=money,
+                                      master_deck=master_deck,
                                       hand_plays_run=plays_run, hand_plays_round=plays_round)
         return _enter_cashout_or_win(carried, info)
 
@@ -238,12 +260,14 @@ def step(state: GameState, action: tuple[Verb, tuple[int, ...]]) -> tuple[GameSt
         lost = dataclasses.replace(state, hand=tuple(hand), deck=tuple(deck),
                                    round_score=round_score, hands_left=0,
                                    done=True, won=False, phase=Phase.LOST,
-                                   jokers=new_jokers, rng=rng,
+                                   jokers=new_jokers, rng=rng, money=money,
+                                   master_deck=master_deck,
                                    hand_plays_run=plays_run, hand_plays_round=plays_round)
         return lost, {**info, "result": "lost"}
     nxt = dataclasses.replace(state, hand=tuple(hand), deck=tuple(deck),
                               round_score=round_score, hands_left=hands_left,
-                              jokers=new_jokers, rng=rng,
+                              jokers=new_jokers, rng=rng, money=money,
+                              master_deck=master_deck,
                               hand_plays_run=plays_run, hand_plays_round=plays_round)
     return nxt, info
 

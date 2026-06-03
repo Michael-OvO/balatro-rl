@@ -27,6 +27,11 @@ class ScoreResult:
     mult: float
     scoring_idx: tuple[int, ...]
     rng: object = None    # rng after probabilistic hooks consumed it (threaded back to GameState)
+    # Side effects threaded out of the pure scoring fold; the engine applies them
+    # (mirrors how res.rng is written back). Both default to no-op: no joker /
+    # enhancement produces them yet, so they are always 0 / () for the current game.
+    money_delta: int = 0              # money gained during scoring (Lucky/Gold seal/Gold enh)
+    destroyed_idx: tuple[int, ...] = ()  # indices into the PLAYED hand to destroy (Glass)
 
 
 def _apply(ctx: ScoreContext, eff) -> None:
@@ -108,4 +113,5 @@ def score_play(played, jokers: tuple = (), held: tuple = (), *,
     # antes). Revisit with exact/bignum scoring when Endless is implemented.
     return ScoreResult(score=int(ctx.chips * ctx.mult), hand_type=hand_type,
                        chips=ctx.chips, mult=ctx.mult, scoring_idx=tuple(scoring_idx),
-                       rng=ctx.rng)
+                       rng=ctx.rng, money_delta=ctx.money_delta,
+                       destroyed_idx=tuple(ctx.destroyed_idx))

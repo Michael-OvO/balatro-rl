@@ -47,3 +47,9 @@ class GameState:
     rerolls_done: int = 0      # rerolls used in the current shop (for reroll cost)
     shop_steps: int = 0        # actions taken this shop visit; bounds shop dithering
     req_scale: float = 1.0     # curriculum: scales the blind score target (1.0 = real game)
+    # The persistent set of owned cards (the 52-card master deck) WITH their mod
+    # fields. Each blind reshuffles the working `deck` FROM this, so any card mod
+    # (enhancement/edition/seal) rides forward across blinds. Defaults to () for
+    # back-compat with directly-constructed states; reset() seeds it from
+    # standard_deck(). Card destruction (Glass) drops entries from here.
+    master_deck: tuple[Card, ...] = ()
