@@ -17,10 +17,13 @@ def test_evaluate_returns_metric_keys():
     net, p = _params()
     m = evaluate(net, p, seeds=[0, 1, 2], reward_name="max_depth")
     assert set(m.keys()) == {"eval/mean_ante", "eval/max_ante", "eval/win_rate",
-                             "eval/mean_run_chips", "eval/mean_ep_len"}
+                             "eval/mean_run_chips", "eval/mean_ep_len",
+                             "eval/mean_blinds_cleared", "eval/max_blinds_cleared",
+                             "eval/blind1_clear_rate"}
     assert all(np.isfinite(v) for v in m.values())
     assert m["eval/mean_ante"] >= 1.0          # every run reaches at least ante 1
     assert 0.0 <= m["eval/win_rate"] <= 1.0
+    assert 0.0 <= m["eval/blind1_clear_rate"] <= 1.0
 
 
 def test_evaluate_is_deterministic():

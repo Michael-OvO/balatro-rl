@@ -57,6 +57,21 @@ def test_record_agent_episode_step_dicts():
     assert replay_states(3, actions)[-1].done
 
 
+def test_record_agent_episode_structured_and_terminal():
+    net, p = _net_params()
+    steps = record_agent_episode(net, p, seed=3, reward_name="max_depth")
+    mid = steps[0]
+    assert mid["schema"] == 2
+    assert mid["verb"] in ("PLAY", "DISCARD", "BUY", "SELL", "REROLL", "REORDER", "LEAVE_SHOP")
+    assert isinstance(mid["hand"], list) and {"rank", "suit"} <= set(mid["hand"][0])
+    assert isinstance(mid["selected"], list)
+    for k in ("round_score", "required", "hands_left", "discards_left"):
+        assert isinstance(mid[k], int)
+    # last frame is an explicit terminal showing the outcome
+    assert steps[-1]["verb"] == "TERMINAL" and steps[-1]["phase"] in ("WON", "LOST")
+    assert steps[-1]["phase"] == "WON" or steps[-1]["hands_left"] == 0
+
+
 def test_record_is_deterministic_greedy(tmp_path):
     net, p = _net_params()
     a = record_agent_episode(net, p, seed=5, reward_name="max_depth")
