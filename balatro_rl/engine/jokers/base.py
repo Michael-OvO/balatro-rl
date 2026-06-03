@@ -58,6 +58,19 @@ class JokerType(IntEnum):
     POPCORN = 97
     SPARE_TROUSERS = 98
     WEE_JOKER = 124
+    # --- Batch 3: hand-contains xMult, suit on-scored, suit-reading, economy ---
+    THE_DUO = 131
+    THE_TRIO = 132
+    THE_FAMILY = 133
+    THE_ORDER = 134
+    THE_TRIBE = 135
+    ONYX_AGATE = 119
+    ARROWHEAD = 118
+    SEEING_DOUBLE = 128
+    FLOWER_POT = 122
+    BLACKBOARD = 48
+    TO_THE_MOON = 84
+    DELAYED_GRATIFICATION = 35
 
 
 class Rarity(IntEnum):

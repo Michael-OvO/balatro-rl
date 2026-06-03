@@ -428,3 +428,114 @@ class _Popcorn(JokerEffect):  # wiki: /w/Popcorn  — +20 Mult, -4 Mult per roun
         return Effect(mult=max(0.0, 20.0 - 4.0 * js.counter))
     def on_round_end(self, state, js, rng):
         return dataclasses.replace(js, counter=js.counter + 1.0), 0, False, rng
+
+
+# --- Batch 3: hand-contains xMult (independent) ---
+
+@register(JokerType.THE_DUO)
+class _TheDuo(JokerEffect):  # wiki: /w/The_Duo  — X2 Mult if hand contains a Pair
+    rarity = Rarity.RARE
+    cost = 8
+    def independent(self, ctx, js):
+        return Effect(xmult=2.0) if HandType.PAIR in ctx.contains else Effect()
+
+
+@register(JokerType.THE_TRIO)
+class _TheTrio(JokerEffect):  # wiki: /w/The_Trio  — X3 Mult if contains Three of a Kind
+    rarity = Rarity.RARE
+    cost = 8
+    def independent(self, ctx, js):
+        return Effect(xmult=3.0) if HandType.THREE_OF_A_KIND in ctx.contains else Effect()
+
+
+@register(JokerType.THE_FAMILY)
+class _TheFamily(JokerEffect):  # wiki: /w/The_Family  — X4 Mult if contains Four of a Kind
+    rarity = Rarity.RARE
+    cost = 8
+    def independent(self, ctx, js):
+        return Effect(xmult=4.0) if HandType.FOUR_OF_A_KIND in ctx.contains else Effect()
+
+
+@register(JokerType.THE_ORDER)
+class _TheOrder(JokerEffect):  # wiki: /w/The_Order  — X3 Mult if contains a Straight
+    rarity = Rarity.RARE
+    cost = 8
+    def independent(self, ctx, js):
+        return Effect(xmult=3.0) if HandType.STRAIGHT in ctx.contains else Effect()
+
+
+@register(JokerType.THE_TRIBE)
+class _TheTribe(JokerEffect):  # wiki: /w/The_Tribe  — X2 Mult if contains a Flush
+    rarity = Rarity.RARE
+    cost = 8
+    def independent(self, ctx, js):
+        return Effect(xmult=2.0) if HandType.FLUSH in ctx.contains else Effect()
+
+
+# --- Batch 3: suit on-scored (per-card on_score) ---
+
+@register(JokerType.ONYX_AGATE)
+class _OnyxAgate(JokerEffect):  # wiki: /w/Onyx_Agate  — +7 Mult per scored Club
+    rarity = Rarity.UNCOMMON
+    cost = 7
+    def on_score(self, ctx, card, index, js):
+        return Effect(mult=7) if card.suit == 2 else Effect()
+
+
+@register(JokerType.ARROWHEAD)
+class _Arrowhead(JokerEffect):  # wiki: /w/Arrowhead  — +50 Chips per scored Spade
+    rarity = Rarity.UNCOMMON
+    cost = 7
+    def on_score(self, ctx, card, index, js):
+        return Effect(chips=50) if card.suit == 0 else Effect()
+
+
+# --- Batch 3: independent jokers reading the scoring / held cards ---
+
+@register(JokerType.SEEING_DOUBLE)
+class _SeeingDouble(JokerEffect):  # wiki: /w/Seeing_Double  — X2 Mult if scoring cards include a Club and a card of any other suit
+    rarity = Rarity.UNCOMMON
+    cost = 6
+    def independent(self, ctx, js):
+        suits = {ctx.played[i].suit for i in ctx.scoring_idx}
+        return Effect(xmult=2.0) if (2 in suits and suits - {2}) else Effect()
+
+
+@register(JokerType.FLOWER_POT)
+class _FlowerPot(JokerEffect):  # wiki: /w/Flower_Pot  — X3 Mult if scoring cards include all four suits
+    rarity = Rarity.UNCOMMON
+    cost = 6
+    def independent(self, ctx, js):
+        suits = {ctx.played[i].suit for i in ctx.scoring_idx}
+        return Effect(xmult=3.0) if {0, 1, 2, 3} <= suits else Effect()
+
+
+@register(JokerType.BLACKBOARD)
+class _Blackboard(JokerEffect):  # wiki: /w/Blackboard  — X3 Mult if every held card is a Spade or Club (vacuously true if none held)
+    rarity = Rarity.UNCOMMON
+    cost = 6
+    def independent(self, ctx, js):
+        all_dark = all(card.suit in (0, 2) for card in ctx.held)
+        return Effect(xmult=3.0) if all_dark else Effect()
+
+
+# --- Batch 3: economy (on_round_end) ---
+
+@register(JokerType.TO_THE_MOON)
+class _ToTheMoon(JokerEffect):  # wiki: /w/To_the_Moon  — extra $1 interest per $5 held at end of round (capped like normal interest)
+    rarity = Rarity.UNCOMMON
+    cost = 5
+    def on_round_end(self, state, js, rng):
+        from ..economy import interest
+        return js, interest(state.money), False, rng
+
+
+@register(JokerType.DELAYED_GRATIFICATION)
+class _DelayedGratification(JokerEffect):  # wiki: /w/Delayed_Gratification  — $2 per remaining discard if no discards used this round
+    rarity = Rarity.COMMON
+    cost = 4
+    def on_round_end(self, state, js, rng):
+        from ..engine import DISCARDS_PER_BLIND
+        if state.discards_left == DISCARDS_PER_BLIND:
+            return js, 2 * state.discards_left, False, rng
+        return js, 0, False, rng
