@@ -1,8 +1,10 @@
 import dataclasses
 from balatro_rl.engine.cards import Card
+from balatro_rl.engine.consumables import ConsumableKind, PlanetType
 from balatro_rl.engine.engine import Verb, reset, legal_actions, step
 from balatro_rl.engine.state import Phase
 from balatro_rl.engine.jokers.base import JokerType, JokerState
+from balatro_rl.engine.shop import CONSUMABLE_COST, ShopItem, ShopKind
 import balatro_rl.engine.jokers.library  # noqa: F401
 
 
@@ -24,17 +26,61 @@ def test_clearing_a_blind_enters_shop_and_pays_out():
     assert s2.blind_index == 0   # NOT advanced yet (advance happens on leave)
 
 
+def _force_offers(s, offers):
+    """Replace the shop offers with a known typed set (engine offers are now ShopItems)."""
+    return dataclasses.replace(s, shop_offers=tuple(offers))
+
+
 def test_shop_buy_adds_joker_and_spends():
     s = _clearable(money=100, hands_left=1)
     s2, _ = step(s, (Verb.PLAY, (0, 1, 2, 3)))  # enter shop
     assert s2.phase == Phase.SHOP
-    offer0 = s2.shop_offers[0]
-    cost = __import__("balatro_rl.engine.shop", fromlist=["joker_cost"]).joker_cost(offer0.type)
+    # Pin a known JOKER offer so the buy assertions don't depend on the random roll.
+    s2 = _force_offers(s2, [ShopItem(int(ShopKind.JOKER), int(JokerType.BLUEPRINT), 10)])
     s3, info = step(s2, (Verb.BUY, 0))
-    assert info["verb"] == "buy"
-    assert s3.money == s2.money - cost
-    assert s3.jokers[-1].type == offer0.type
-    assert len(s3.shop_offers) == 1
+    assert info["verb"] == "buy" and info["kind"] == int(ShopKind.JOKER)
+    assert info["type_id"] == int(JokerType.BLUEPRINT) and info["cost"] == 10
+    assert s3.money == s2.money - 10
+    assert s3.jokers[-1].type == JokerType.BLUEPRINT
+    assert len(s3.shop_offers) == 0
+
+
+def test_shop_buy_planet_adds_consumable():
+    """A Planet offer is bought into a consumable slot (kind-aware BUY), $3, jokers untouched.
+    Reachable only via a direct engine.step — the policy stays blind to consumable offers."""
+    s = _clearable(money=100, hands_left=1)
+    s2, _ = step(s, (Verb.PLAY, (0, 1, 2, 3)))   # enter shop
+    s2 = _force_offers(s2, [ShopItem(int(ShopKind.PLANET), int(PlanetType.MERCURY),
+                                     CONSUMABLE_COST)])
+    assert s2.consumables == () and s2.consumable_slots == 2
+    s3, info = step(s2, (Verb.BUY, 0))
+    assert info["verb"] == "buy" and info["kind"] == int(ShopKind.PLANET)
+    assert info["type_id"] == int(PlanetType.MERCURY) and info["cost"] == CONSUMABLE_COST
+    assert s3.money == s2.money - CONSUMABLE_COST
+    assert len(s3.consumables) == 1
+    con = s3.consumables[-1]
+    # Stored under ConsumableKind (so USE/obs read it right), not the raw ShopKind.
+    assert con.kind == int(ConsumableKind.PLANET) and con.type_id == int(PlanetType.MERCURY)
+    assert s3.jokers == ()                        # joker slots untouched
+    assert len(s3.shop_offers) == 0
+    # The bought Planet is a valid consumable: USE it and Mercury levels up Pair.
+    from balatro_rl.engine.hands import HandType
+    before = s3.levels[int(HandType.PAIR)]
+    s4, uinfo = step(s3, (Verb.USE, 0))
+    assert uinfo["verb"] == "use"
+    assert s4.levels[int(HandType.PAIR)] == before + 1 and s4.consumables == ()
+
+
+def test_legal_actions_never_offers_consumable_buy():
+    """E1: the policy is blind to consumable offers — only JOKER offers get a BUY action."""
+    s = _clearable(money=100, hands_left=1)
+    s2, _ = step(s, (Verb.PLAY, (0, 1, 2, 3)))
+    s2 = _force_offers(s2, [
+        ShopItem(int(ShopKind.PLANET), int(PlanetType.MERCURY), CONSUMABLE_COST),
+        ShopItem(int(ShopKind.JOKER), int(JokerType.BLUEPRINT), 10),
+    ])
+    buys = {a[1] for a in legal_actions(s2) if a[0] == Verb.BUY}
+    assert buys == {1}        # only the JOKER offer (slot 1) is buyable; the Planet (slot 0) isn't
 
 
 def test_shop_sell_returns_money_and_frees_slot():
@@ -87,9 +133,11 @@ def test_clearing_ante8_boss_wins_no_shop():
 def test_legal_actions_in_shop():
     s = _clearable(money=100, hands_left=1)
     s2, _ = step(s, (Verb.PLAY, (0, 1, 2, 3)))
+    # Pin an affordable JOKER offer so BUY is guaranteed regardless of the random roll.
+    s2 = _force_offers(s2, [ShopItem(int(ShopKind.JOKER), int(JokerType.BLUEPRINT), 10)])
     verbs = {a[0] for a in legal_actions(s2)}
     assert Verb.LEAVE_SHOP in verbs
-    assert Verb.BUY in verbs     # affordable offers exist
+    assert Verb.BUY in verbs     # affordable joker offer exists
     assert Verb.REROLL in verbs
 
 

@@ -22,13 +22,16 @@ from .bosses import (
     is_finisher, select_boss,
 )
 from .cards import Enhancement, standard_deck
-from .consumables import apply_consumable
+from .consumables import Consumable, apply_consumable
 from .economy import blind_reward, interest, MONEY_PER_UNUSED_HAND
 from .hands import evaluate
-from .jokers.base import HandEvents, NO_RULES, REGISTRY, aggregate_rules
+from .jokers.base import HandEvents, JokerState, NO_RULES, REGISTRY, aggregate_rules
 from .rng import RNG
 from .scoring import score_play
-from .shop import generate_offers, joker_cost, reroll_cost, sell_value, CARD_SLOTS
+from .shop import (
+    CARD_SLOTS, SHOP_TO_CONSUMABLE_KIND, ShopKind, generate_offers,
+    reroll_cost, sell_value,
+)
 from .state import GameState, Phase
 
 STARTING_MONEY = 4
@@ -138,8 +141,12 @@ def legal_actions(state: GameState) -> list[tuple[Verb, tuple[int, ...]]]:
         if state.shop_steps >= SHOP_ACTION_CAP:
             return [(Verb.LEAVE_SHOP, 0)]          # bound shop dithering -> force progress
         actions = use + [(Verb.LEAVE_SHOP, 0)]
+        # E1: the agent stays blind to consumable offers — only JOKER-kind offers are
+        # buyable from the policy (a free joker slot + affordable). Consumable buys are
+        # reachable only via a direct engine.step((Verb.BUY, i)), not offered here.
         for i, offer in enumerate(state.shop_offers):
-            if state.money >= joker_cost(offer.type) and len(state.jokers) < JOKER_SLOTS:
+            if (offer.kind == ShopKind.JOKER and state.money >= offer.cost
+                    and len(state.jokers) < JOKER_SLOTS):
                 actions.append((Verb.BUY, i))
         for i in range(len(state.jokers)):
             actions.append((Verb.SELL, i))
@@ -424,14 +431,26 @@ def _shop_step(state: GameState, action):
         i = action[1]
         assert 0 <= i < len(state.shop_offers), "no such shop offer"
         offer = state.shop_offers[i]
-        cost = joker_cost(offer.type)
+        cost = offer.cost
         assert state.money >= cost, "cannot afford"
-        assert len(state.jokers) < JOKER_SLOTS, "no joker slot"
         offers = tuple(o for k, o in enumerate(state.shop_offers) if k != i)
-        nxt = dataclasses.replace(state, money=state.money - cost,
-                                  jokers=state.jokers + (offer,), shop_offers=offers,
-                                  shop_steps=state.shop_steps + 1)
-        return nxt, {"verb": "buy", "joker": int(offer.type), "cost": cost}
+        common = dict(money=state.money - cost, shop_offers=offers,
+                      shop_steps=state.shop_steps + 1)
+        # Kind-aware acquisition: a JOKER fills a joker slot; any consumable kind (PLANET
+        # here, more in later phases) goes to a consumable slot (respecting the cap).
+        if offer.kind == ShopKind.JOKER:
+            assert len(state.jokers) < JOKER_SLOTS, "no joker slot"
+            nxt = dataclasses.replace(state, jokers=state.jokers + (
+                JokerState(type=offer.type_id),), **common)
+        else:
+            assert len(state.consumables) < state.consumable_slots, "no consumable slot"
+            # Store the consumable under its ConsumableKind (so USE/obs/replay read it
+            # correctly), not the raw ShopKind — the two enums number members differently.
+            con_kind = SHOP_TO_CONSUMABLE_KIND[offer.kind]
+            nxt = dataclasses.replace(state, consumables=state.consumables + (
+                Consumable(kind=con_kind, type_id=offer.type_id),), **common)
+        return nxt, {"verb": "buy", "kind": int(offer.kind),
+                     "type_id": int(offer.type_id), "cost": cost}
     if verb == Verb.SELL:
         i = action[1]
         assert 0 <= i < len(state.jokers), "no such joker"
