@@ -17,10 +17,11 @@ def _stack(obs_list: list[dict]) -> dict:
 class SyncVectorEnv:
     def __init__(self, num_envs: int, reward_name: str = "shaped", base_seed: int = 0,
                  req_scale: float = 1.0, enable_bosses: bool = False,
-                 enhance_rate: float = 0.0, grant_planets: int = 0):
+                 enhance_rate: float = 0.0, grant_planets: int = 0, boss_rate: float = 1.0):
         self.num_envs = num_envs
         self.base_seed = base_seed
-        self._envs = [BalatroEnv(reward_name, req_scale, enable_bosses, enhance_rate, grant_planets)
+        self._envs = [BalatroEnv(reward_name, req_scale, enable_bosses, enhance_rate,
+                                 grant_planets, boss_rate)
                       for _ in range(num_envs)]
         self._next_seed = base_seed
         self._obs = None
@@ -30,6 +31,11 @@ class SyncVectorEnv:
         """Update the curriculum scale on EVERY sub-env; new (incl. auto-reset) episodes use it."""
         for env in self._envs:
             env.set_req_scale(scale)
+
+    def set_boss_rate(self, rate: float):
+        """Update the curriculum boss probability on EVERY sub-env (per-episode roll at reset)."""
+        for env in self._envs:
+            env.set_boss_rate(rate)
 
     def _fresh_seed(self) -> int:
         s = self._next_seed

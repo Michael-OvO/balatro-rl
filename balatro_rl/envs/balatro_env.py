@@ -19,10 +19,15 @@ from .rewards import make_reward
 class BalatroEnv:
     def __init__(self, reward_name: str = "shaped", req_scale: float = 1.0,
                  enable_bosses: bool = False, enhance_rate: float = 0.0,
-                 grant_planets: int = 0):
+                 grant_planets: int = 0, boss_rate: float = 1.0):
         self._reward = make_reward(reward_name)
         self._req_scale = req_scale
-        self._enable_bosses = enable_bosses   # boss blinds on the boss slot (Phase D retrain)
+        self._enable_bosses = enable_bosses   # master switch: can this env have boss blinds at all
+        # boss_rate is the per-EPISODE probability a boss blind actually carries a boss (the E5
+        # boss curriculum). enable_bosses=True, boss_rate ramps 0->1 alongside req_scale so bosses
+        # fade in as the score bar rises (the plateau came from bosses being full-strength while
+        # the target was still ramping). Eval/deploy uses boss_rate=1.0 (every episode has bosses).
+        self._boss_rate = boss_rate
         # Acquisition exposure for the retrain (default off -> byte-identical plain game).
         self._enhance_rate = enhance_rate     # prob each deck card starts enhanced
         self._grant_planets = grant_planets   # # of Planet consumables to start with
@@ -32,10 +37,23 @@ class BalatroEnv:
         """Curriculum target scale; applied at the NEXT reset (in-progress episode keeps its)."""
         self._req_scale = scale
 
+    def set_boss_rate(self, rate: float):
+        """Curriculum boss probability; applied at the NEXT reset (per-episode roll)."""
+        self._boss_rate = rate
+
+    def _boss_enabled_this_episode(self, seed: int) -> bool:
+        """Per-episode boss decision: master switch AND a seed-deterministic roll vs boss_rate.
+        Decorrelated from the engine's own seed so the curriculum knob doesn't bias the game RNG."""
+        if not self._enable_bosses or self._boss_rate <= 0.0:
+            return False
+        if self._boss_rate >= 1.0:
+            return True
+        return bool(np.random.default_rng(int(seed) ^ 0xB055CA11).random() < self._boss_rate)
+
     def reset(self, seed: int = 0):
         card_mods, consumables = make_exposure(seed, self._enhance_rate, self._grant_planets)
         self.state = engine.reset(seed, self._req_scale, card_mods=card_mods,
-                                  enable_bosses=self._enable_bosses)
+                                  enable_bosses=self._boss_enabled_this_episode(seed))
         if consumables:
             self.state = dataclasses.replace(self.state, consumables=consumables)
         self._reward.reset()

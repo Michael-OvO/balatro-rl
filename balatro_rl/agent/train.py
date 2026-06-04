@@ -54,6 +54,10 @@ class TrainConfig:
     ramp_clear_rate: float = 0.7
     ramp_step: float = 0.05
     ramp_window: int = 20
+    # E5 boss curriculum: when True, the per-episode boss probability tracks cur_scale, so bosses
+    # fade in as the score target ramps (the plateau came from full-strength bosses under a still-
+    # low target). No-op unless enable_bosses; eval always uses the full deploy target (boss_rate=1).
+    boss_curriculum: bool = True
 
 
 @dataclasses.dataclass
@@ -149,9 +153,13 @@ def train(cfg: TrainConfig, logger=None, init_params=None) -> TrainResult:
     # curr_floor when curr_floor < 1.0; else the real game (scale 1.0).
     _open_loop = callable(cfg.req_scale_schedule)
     cur_scale = float(cfg.req_scale_schedule(0)) if _open_loop else float(cfg.curr_floor)
+    # Boss probability tracks the score curriculum (E5); 1.0 when the boss curriculum is off.
+    def _boss_rate_for(scale: float) -> float:
+        return float(scale) if cfg.boss_curriculum else 1.0
     venv = SyncVectorEnv(cfg.num_envs, cfg.reward_name, base_seed=cfg.seed + 1000,
                          req_scale=cur_scale, enable_bosses=cfg.enable_bosses,
-                         enhance_rate=cfg.enhance_rate, grant_planets=cfg.grant_planets)
+                         enhance_rate=cfg.enhance_rate, grant_planets=cfg.grant_planets,
+                         boss_rate=_boss_rate_for(cur_scale))
     next_obs, next_mask = venv.reset()
     T, N = cfg.num_steps, cfg.num_envs
     assert (T * N) % cfg.num_minibatches == 0, (
@@ -177,6 +185,7 @@ def train(cfg: TrainConfig, logger=None, init_params=None) -> TrainResult:
         if _open_loop:
             cur_scale = float(cfg.req_scale_schedule(len(losses)))
             venv.set_req_scale(cur_scale)
+            venv.set_boss_rate(_boss_rate_for(cur_scale))
         update_cleared = update_episodes = 0   # episodes that cleared >=1 blind / total episodes
         update_max_ante, update_max_hand_score, update_max_round = 1, 0, 0
         buf = {
@@ -236,6 +245,7 @@ def train(cfg: TrainConfig, logger=None, init_params=None) -> TrainResult:
         logger.log({"loss/total": total, "loss/policy": pg, "loss/value": vl,
                     "loss/entropy": ent, "train/mean_reward": mean_returns[-1],
                     "train/ent_coef": ec, "train/req_scale": cur_scale,
+                    "train/boss_rate": _boss_rate_for(cur_scale),
                     "train/clear_rate": clear_rate, "train/max_ante": update_max_ante,
                     "train/max_hand_score": update_max_hand_score,
                     "train/max_round_score": update_max_round}, step=update_idx)
@@ -244,6 +254,7 @@ def train(cfg: TrainConfig, logger=None, init_params=None) -> TrainResult:
             if new_scale != cur_scale:
                 cur_scale = new_scale
                 venv.set_req_scale(cur_scale)   # windows SLIDE (no reset) -> moving-average ramp
+                venv.set_boss_rate(_boss_rate_for(cur_scale))   # bosses fade in with the score bar
         if cfg.eval_interval and (update_idx % cfg.eval_interval == 0):
             # Eval on the DEPLOY target: the real game (full req_scale, bosses as trained,
             # plain deck -> exposure OFF), not the training distribution it never deploys to.
