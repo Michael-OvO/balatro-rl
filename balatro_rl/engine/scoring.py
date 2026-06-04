@@ -19,11 +19,14 @@ from .jokers.base import (
 from .rng import RNG
 
 
-def _t(ctx: ScoreContext, label: str) -> None:
-    """Record a running-total breakdown event for the viewer (no-op off the trace path)."""
+def _t(ctx: ScoreContext, label: str, dc: int = 0, dm: float = 0.0, xm: float = 1.0) -> None:
+    """Record a running-total breakdown event for the viewer (no-op off the trace path).
+    dc/dm/xm are the EXPLICIT delta this contribution applied (+chips / +mult / xMult), so
+    the viewer never has to guess additive-vs-multiplicative from the running totals."""
     if ctx.trace is not None:
         ctx.trace.append({"label": label, "chips": int(ctx.chips),
-                          "mult": round(float(ctx.mult), 4)})
+                          "mult": round(float(ctx.mult), 4),
+                          "dc": int(dc), "dm": round(float(dm), 4), "xm": round(float(xm), 4)})
 
 
 def _apply_traced(ctx: ScoreContext, eff, js) -> None:
@@ -32,7 +35,7 @@ def _apply_traced(ctx: ScoreContext, eff, js) -> None:
     c0, m0 = ctx.chips, ctx.mult
     _apply(ctx, eff)
     if ctx.trace is not None and (ctx.chips != c0 or ctx.mult != m0):
-        _t(ctx, JokerType(js.type).name)
+        _t(ctx, JokerType(js.type).name, dc=eff.chips, dm=eff.mult, xm=eff.xmult)
 
 
 @dataclasses.dataclass(frozen=True, slots=True)
@@ -85,13 +88,13 @@ def _score_card_mods(ctx: ScoreContext, card: Card, skip_enhancement: bool = Fal
     # --- enhancement: additive first ---
     if enh == Enhancement.BONUS:
         ctx.chips += 30
-        _t(ctx, f"{lbl} Bonus +30 chips")
+        _t(ctx, f"{lbl} Bonus +30 chips", dc=30)
     elif enh == Enhancement.MULT:
         ctx.mult += 4
-        _t(ctx, f"{lbl} Mult +4 mult")
+        _t(ctx, f"{lbl} Mult +4 mult", dm=4)
     elif enh == Enhancement.STONE:
         ctx.chips += 50                 # Stone's flat value (it has no rank chips)
-        _t(ctx, f"{lbl} Stone +50 chips")
+        _t(ctx, f"{lbl} Stone +50 chips", dc=50)
     elif enh == Enhancement.LUCKY:
         # Two INDEPENDENT rolls: 1-in-5 -> +20 Mult, 1-in-15 -> +$20. Both consume
         # ctx.rng (mult roll first, then money roll), mirroring how Misprint/
@@ -101,7 +104,7 @@ def _score_card_mods(ctx: ScoreContext, card: Card, skip_enhancement: bool = Fal
         if roll < 1 / 5:
             ctx.mult += 20
             triggered = True
-            _t(ctx, f"{lbl} Lucky +20 mult")
+            _t(ctx, f"{lbl} Lucky +20 mult", dm=20)
         roll, ctx.rng = ctx.rng.random()
         if roll < 1 / 15:
             ctx.money_delta += 20
@@ -115,17 +118,17 @@ def _score_card_mods(ctx: ScoreContext, card: Card, skip_enhancement: bool = Fal
     ed = card.edition
     if ed == Edition.FOIL:
         ctx.chips += 50
-        _t(ctx, f"{lbl} Foil +50 chips")
+        _t(ctx, f"{lbl} Foil +50 chips", dc=50)
     elif ed == Edition.HOLO:
         ctx.mult += 10
-        _t(ctx, f"{lbl} Holo +10 mult")
+        _t(ctx, f"{lbl} Holo +10 mult", dm=10)
     # --- enhancement xmult (Glass) then edition xmult (Poly) ---
     if enh == Enhancement.GLASS:
         ctx.mult *= 2
-        _t(ctx, f"{lbl} Glass X2 mult")
+        _t(ctx, f"{lbl} Glass X2 mult", xm=2)
     if ed == Edition.POLY:
         ctx.mult *= 1.5
-        _t(ctx, f"{lbl} Poly X1.5 mult")
+        _t(ctx, f"{lbl} Poly X1.5 mult", xm=1.5)
     # --- seal money (Gold pays $3 when the card scores) ---
     if card.seal == Seal.GOLD:
         ctx.money_delta += 3
@@ -254,7 +257,7 @@ def score_play(played, jokers: tuple = (), held: tuple = (), *,
             if not is_stone(card):
                 ctx.chips += rank_chip_value(card.rank)
                 if ctx.trace is not None:
-                    _t(ctx, f"{card_str(card)} +{rank_chip_value(card.rank)} chips")
+                    _t(ctx, f"{card_str(card)} +{rank_chip_value(card.rank)} chips", dc=rank_chip_value(card.rank))
             for eff, js in providers:
                 _apply_traced(ctx, eff.on_score(ctx, card, i, js), js)
             _score_card_mods(ctx, card, skip_enhancement=consume)
@@ -271,7 +274,7 @@ def score_play(played, jokers: tuple = (), held: tuple = (), *,
         if card.enhancement == Enhancement.STEEL:
             ctx.mult *= 1.5
             if ctx.trace is not None:
-                _t(ctx, f"{card_str(card)} Steel X1.5 mult (held)")
+                _t(ctx, f"{card_str(card)} Steel X1.5 mult (held)", xm=1.5)
 
     # 3) independent jokers, slot order
     for eff, js in providers:

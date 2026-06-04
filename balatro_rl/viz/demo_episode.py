@@ -94,7 +94,9 @@ def build_demo_episode() -> list[dict]:
 def main():
     out_dir = os.environ.get("BALATRO_EPISODE_DIR", "/tmp/sweep_out")
     os.makedirs(out_dir, exist_ok=True)
-    path = os.path.join(out_dir, "demo_rich_content.json")
+    # NOTE: the viewer's picker only lists files matching *.episode.json (see
+    # viewer.list_episodes), so the demo MUST use that suffix to appear in the dropdown.
+    path = os.path.join(out_dir, "demo_rich_content.episode.json")
     save_episode(build_demo_episode(), path)
     print(f"wrote demo episode -> {path}")
 
