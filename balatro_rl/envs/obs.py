@@ -113,10 +113,13 @@ def encode(state: GameState) -> dict[str, np.ndarray]:
     shop_types = np.zeros(MAX_SHOP, dtype=np.int32)
     shop_cost = np.zeros(MAX_SHOP, dtype=np.float32)
     shop_mask = np.zeros(MAX_SHOP, dtype=np.float32)
-    from ..engine.shop import joker_cost
-    for i, js in enumerate(state.shop_offers[:MAX_SHOP]):
-        shop_types[i] = int(js.type)
-        shop_cost[i] = float(joker_cost(js.type))
+    # E1: the agent is BLIND to consumable offers. A JOKER offer encodes its joker-vocab
+    # type id; a non-joker offer encodes type 0 (no info beyond "an offer exists"). Cost
+    # and mask are still set for every offer (same fields/shapes; just kind-aware).
+    from ..engine.shop import ShopKind
+    for i, offer in enumerate(state.shop_offers[:MAX_SHOP]):
+        shop_types[i] = int(offer.type_id) if offer.kind == ShopKind.JOKER else 0
+        shop_cost[i] = float(offer.cost)
         shop_mask[i] = 1.0
 
     levels = np.asarray(state.levels, dtype=np.float32)

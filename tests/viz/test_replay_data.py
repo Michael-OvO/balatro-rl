@@ -7,7 +7,28 @@ from balatro_rl.agent.spec import dummy_obs
 from balatro_rl.envs.actions import NUM_ACTIONS
 from balatro_rl.viz.replay_data import (
     action_label, render_board, replay_states, record_agent_episode, save_episode, load_episode,
+    _consum_d, _offer_d,
 )
+from balatro_rl.engine.consumables import ConsumableKind, PlanetType, TarotType, tarot
+from balatro_rl.engine.shop import ShopItem, ShopKind
+
+
+def test_offer_d_renders_tarot_offer():
+    o = ShopItem(kind=int(ShopKind.TAROT), type_id=int(TarotType.THE_CHARIOT), cost=3)
+    d = _offer_d(o)
+    assert d["kind"] == int(ShopKind.TAROT) and d["name"] == "The Chariot" and d["cost"] == 3
+
+
+def test_offer_d_renders_planet_and_joker_unchanged():
+    p = ShopItem(kind=int(ShopKind.PLANET), type_id=int(PlanetType.MERCURY), cost=3)
+    assert _offer_d(p)["name"] == "Mercury"
+
+
+def test_consum_d_renders_owned_tarot():
+    d = _consum_d(tarot(TarotType.THE_HANGED_MAN))
+    assert d["kind"] == int(ConsumableKind.TAROT)
+    assert d["name"] == "The Hanged Man"
+    assert "Destroys" in d["desc"]
 
 
 def test_action_label_covers_verbs():

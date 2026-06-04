@@ -19,17 +19,28 @@ from .bosses import (
     BossEffect, boss_allows_play, boss_debuffed_idx, boss_discards_left,
     boss_draw_target, boss_filters_plays, boss_halves_base, boss_hand_size_delta,
     boss_hands_left, boss_hook_discard, boss_ox_zeroes_money, boss_tooth_cost,
-    select_boss,
+    is_finisher, select_boss,
 )
 from .cards import Enhancement, standard_deck
-from .consumables import apply_consumable
+from .consumables import Consumable, apply_consumable, consumable_needs_target
 from .economy import blind_reward, interest, MONEY_PER_UNUSED_HAND
 from .hands import evaluate
-from .jokers.base import HandEvents, NO_RULES, REGISTRY, aggregate_rules
+from .jokers.base import HandEvents, JokerState, NO_RULES, REGISTRY, aggregate_rules
 from .rng import RNG
 from .scoring import score_play
-from .shop import generate_offers, joker_cost, reroll_cost, sell_value, CARD_SLOTS
+from .packs import PackItemKind, open_pack, roll_pack
+from .shop import (
+    CARD_SLOTS, SHOP_TO_CONSUMABLE_KIND, ShopKind, generate_offers,
+    reroll_cost, sell_value,
+)
 from .state import GameState, Phase
+from .vouchers import (
+    VOUCHER_COST, VoucherType, extra_card_slots, extra_consumable_slots,
+    extra_discards, extra_hand_size, extra_hands, extra_joker_slots, interest_cap,
+    planet_weight_mult, prereq_met, reroll_discount, roll_voucher, tarot_weight_mult,
+)
+
+PACK_SLOTS = 2                # number of booster-pack offers generated per shop visit
 
 STARTING_MONEY = 4
 HANDS_PER_BLIND = 4
@@ -50,6 +61,12 @@ class Verb(IntEnum):
     REORDER = 5
     LEAVE_SHOP = 6
     USE = 7        # use a consumable (payload = consumable index); a free action, any phase
+    # E3 booster packs (agent BLIND — never emitted by legal_actions; direct engine.step only):
+    OPEN = 8       # in SHOP: buy + open pack_offers[i] -> enter OPEN_PACK
+    PICK = 9       # in OPEN_PACK: take pack_open[i] (consumable/joker slot) -> decrement picks
+    SKIP_PACK = 10  # in OPEN_PACK: end picking -> back to SHOP
+    # E4 vouchers (agent BLIND — never emitted by legal_actions; direct engine.step only):
+    BUY_VOUCHER = 11  # in SHOP: buy the offered voucher -> apply a persistent run modifier
 
 
 def _draw(hand: list, deck: list, hand_size: int) -> tuple[list, list]:
@@ -133,17 +150,40 @@ def legal_actions(state: GameState) -> list[tuple[Verb, tuple[int, ...]]]:
         return []
     # Consumables can be USEd in any phase (a free action). Empty by default -> no USE
     # actions, so the action space is byte-identical until consumables are acquired.
-    use = [(Verb.USE, i) for i in range(len(state.consumables))]
+    # E2: card-targeting Tarots are WITHHELD here — their USE needs target hand indices,
+    # which the agent can't select until the Phase E5 obs/action widening. They remain
+    # reachable via a direct engine.step((Verb.USE, (ci, *targets))). Planets and no-target
+    # Tarots (Hermit/Temperance/High Priestess/Emperor/Judgement) are offered normally.
+    use = [(Verb.USE, i) for i, c in enumerate(state.consumables)
+           if not consumable_needs_target(c)]
+    if state.phase == Phase.OPEN_PACK:
+        # E3: pick K-of-M revealed items. Only items that CAN be added are pickable (a free
+        # joker/consumable slot); SKIP_PACK always ends picking. This phase is only ever
+        # reached via a direct engine.step((OPEN, ...)) — the agent is blind to packs until E5.
+        actions = list(use)
+        for i, item in enumerate(state.pack_open):
+            if _can_take_pack_item(state, item):
+                actions.append((Verb.PICK, i))
+        actions.append((Verb.SKIP_PACK, 0))
+        return actions
     if state.phase == Phase.SHOP:
         if state.shop_steps >= SHOP_ACTION_CAP:
             return [(Verb.LEAVE_SHOP, 0)]          # bound shop dithering -> force progress
         actions = use + [(Verb.LEAVE_SHOP, 0)]
+        # E1: the agent stays blind to consumable offers — only JOKER-kind offers are
+        # buyable from the policy (a free joker slot + affordable). Consumable buys are
+        # reachable only via a direct engine.step((Verb.BUY, i)), not offered here. The joker
+        # cap is voucher-raised (Antimatter +1); reroll cost is voucher-discounted (Reroll
+        # Surplus/Glut). E4: BUY_VOUCHER is NOT emitted here — the agent stays voucher-blind.
+        joker_cap = JOKER_SLOTS + extra_joker_slots(state.vouchers)
         for i, offer in enumerate(state.shop_offers):
-            if state.money >= joker_cost(offer.type) and len(state.jokers) < JOKER_SLOTS:
+            if (offer.kind == ShopKind.JOKER and state.money >= offer.cost
+                    and len(state.jokers) < joker_cap):
                 actions.append((Verb.BUY, i))
         for i in range(len(state.jokers)):
             actions.append((Verb.SELL, i))
-        if state.money >= reroll_cost(state.rerolls_done):
+        if state.money >= reroll_cost(state.rerolls_done,
+                                      discount=reroll_discount(state.vouchers)):
             actions.append((Verb.REROLL, 0))
         n = len(state.jokers)
         for i in range(n):
@@ -184,8 +224,12 @@ def _advance_blind(state: GameState):
         boss, rng = select_boss(rng, new_ante)
     # Boss blind-setup: hand size (Manacle), hands (Needle), discards (Water). Recomputed
     # fresh from the HAND_SIZE base each blind, so a boss's reduction never compounds and
-    # resets on the next blind. All identity for boss == NONE -> byte-identical.
-    hand_size = HAND_SIZE + boss_hand_size_delta(boss)
+    # resets on the next blind. All identity for boss == NONE -> byte-identical. Voucher
+    # bonuses (Paint Brush/Palette hand size; Grabber/Nacho Tong hands; Wasteful/Recyclomancy
+    # discards) are DERIVED from the owned vouchers and added on the base BEFORE the boss
+    # override, so a boss clamp (Water's 0 discards) still wins. Empty vouchers -> +0.
+    vs = state.vouchers
+    hand_size = HAND_SIZE + extra_hand_size(vs) + boss_hand_size_delta(boss)
     # Reshuffle the working deck FROM the persistent master deck so any card mods
     # (enhancement/edition/seal) ride forward across the blind boundary. With an
     # unmodified deck this is byte-identical to the old shuffle(standard_deck()).
@@ -198,19 +242,22 @@ def _advance_blind(state: GameState):
         state, ante=new_ante, blind_index=new_blind, deck=tuple(deck), hand=tuple(hand),
         round_score=0, required=required_score(new_ante, new_blind, state.req_scale, boss),
         hand_size=hand_size,
-        hands_left=boss_hands_left(boss, HANDS_PER_BLIND),
-        discards_left=boss_discards_left(boss, DISCARDS_PER_BLIND), rng=rng,
+        hands_left=boss_hands_left(boss, HANDS_PER_BLIND + extra_hands(vs)),
+        discards_left=boss_discards_left(boss, DISCARDS_PER_BLIND + extra_discards(vs)),
+        rng=rng,
         hand_plays_round=tuple([0] * 12),  # per-round counter resets each blind
         boss=int(boss),
-        jokers=jokers, phase=Phase.PLAYING, shop_offers=(), rerolls_done=0, shop_steps=0)
+        jokers=jokers, phase=Phase.PLAYING, shop_offers=(), rerolls_done=0, shop_steps=0,
+        pack_offers=(), pack_open=(), pack_picks=0)
     return nxt, {"verb": "leave_shop", "result": "next_blind",
                  "ante": new_ante, "blind": new_blind}
 
 
 def _cash_out(state: GameState):
     """Apply blind reward + interest + leftover-hand money + joker on_round_end."""
-    delta = (blind_reward(state.blind_index)
-             + interest(state.money)
+    # Interest uses the voucher-derived cap (Seed Money $10 / Money Tree $20 / else $5).
+    delta = (blind_reward(state.blind_index, is_finisher(BossEffect(state.boss)))
+             + interest(state.money, cap=interest_cap(state.vouchers))
              + state.hands_left * MONEY_PER_UNUSED_HAND)
     # Gold ENHANCEMENT: +$3 for each Gold card still HELD in hand at round end
     # (wiki: Gold Card). Unmodified hands carry no Gold card -> +$0 (byte-identical).
@@ -227,35 +274,77 @@ def _cash_out(state: GameState):
     return money, tuple(kept), rng
 
 
+def _generate_pack_offers(rng, n: int = PACK_SLOTS):
+    """Roll n booster-pack offers (E3), mirroring generate_offers for the card slots.
+    Returns (tuple[Pack, ...], rng)."""
+    packs = []
+    for _ in range(n):
+        pack, rng = roll_pack(rng)
+        packs.append(pack)
+    return tuple(packs), rng
+
+
 def _enter_cashout_or_win(state: GameState, info: dict):
     # Win immediately if the Ante-8 Boss was just cleared (no shop).
     if state.ante >= 8 and state.blind_index == 2:
         won = dataclasses.replace(state, done=True, won=True, phase=Phase.WON)
         return won, {**info, "cleared": True, "result": "won"}
     money, jokers, rng = _cash_out(state)
-    offers, rng = generate_offers(rng, CARD_SLOTS)
+    vs = state.vouchers
+    # Card-slot count + Tarot/Planet shop weights are voucher-derived (Overstock(+Plus);
+    # Tarot/Planet Merchant/Tycoon). Empty vouchers -> base counts/weights (byte-identical).
+    offers, rng = generate_offers(rng, CARD_SLOTS + extra_card_slots(vs),
+                                  tarot_mult=tarot_weight_mult(vs),
+                                  planet_mult=planet_weight_mult(vs))
+    pack_offers, rng = _generate_pack_offers(rng, PACK_SLOTS)
+    # Roll the shop's single voucher slot: a uniform eligible voucher (None if none eligible).
+    voucher, rng = roll_voucher(rng, vs)
     shop = dataclasses.replace(state, money=money, jokers=jokers, rng=rng,
                                phase=Phase.SHOP, shop_offers=offers, rerolls_done=0,
-                               shop_steps=0)
+                               shop_steps=0, pack_offers=pack_offers,
+                               pack_open=(), pack_picks=0,
+                               voucher_offer=0 if voucher is None else int(voucher))
     return shop, {**info, "cleared": True, "result": "shop", "earned": money - state.money}
 
 
-def _use_consumable(state: GameState, ci: int) -> tuple[GameState, dict]:
+def _use_consumable(state: GameState, ci: int, targets=()) -> tuple[GameState, dict]:
     """Apply the consumable at index `ci` and remove it. A free action (doesn't end the
-    turn or touch hands/discards) usable in any phase. Planets level a hand type; other
-    kinds arrive in later sub-phases."""
+    turn or touch hands/discards) usable in any phase. Planets level a hand type; Tarots
+    enhance/transform/destroy SELECTED hand cards (`targets` = hand indices), give money,
+    or create more consumables/jokers.
+
+    apply_consumable returns `(overrides, rng)`; we apply the overrides via
+    dataclasses.replace, thread the (possibly advanced) rng back into the successor, and
+    drop the used consumable. The overrides dict may itself set `consumables` (the create-*
+    Tarots), so we splice the used card out FIRST and let the override win if present."""
     assert 0 <= ci < len(state.consumables), "no such consumable"
     con = state.consumables[ci]
-    overrides = apply_consumable(state, con)
     remaining = state.consumables[:ci] + state.consumables[ci + 1:]
-    nxt = dataclasses.replace(state, consumables=remaining, **overrides)
+    # Resolve against a view with the used card already removed, so create-* Tarots that
+    # return a new `consumables` tuple build on the post-removal slots (cap respected).
+    base = dataclasses.replace(state, consumables=remaining)
+    overrides, rng = apply_consumable(base, con, targets=targets, rng=state.rng)
+    nxt = dataclasses.replace(base, rng=rng, **overrides)
     return nxt, {"verb": "use", "kind": con.kind, "type_id": con.type_id}
 
 
 def step(state: GameState, action: tuple[Verb, tuple[int, ...]]) -> tuple[GameState, dict]:
     assert not state.done, "step() called on a terminal state"
     if action[0] == Verb.USE:        # consumables are usable in any phase (free action)
-        return _use_consumable(state, action[1])
+        # USE-with-targets encoding: the payload is either a bare consumable index
+        #   (Verb.USE, ci)                 -> no targets (Planets, no-target Tarots)
+        # or a tuple whose head is the index and tail is the target hand indices
+        #   (Verb.USE, (ci, *target_idx))  -> card-targeting Tarots
+        # The agent only ever emits the bare form (legal_actions withholds targeting
+        # USEs until E5); the (ci, *targets) form is reachable via direct engine.step.
+        payload = action[1]
+        if isinstance(payload, tuple):
+            ci, targets = payload[0], payload[1:]
+        else:
+            ci, targets = payload, ()
+        return _use_consumable(state, ci, targets)
+    if state.phase == Phase.OPEN_PACK:        # E3: pick K-of-M revealed pack items
+        return _open_pack_step(state, action)
     if state.phase == Phase.SHOP:
         return _shop_step(state, action)
     verb, idx = action
@@ -416,22 +505,102 @@ def explain_play(state: GameState, idx) -> dict:
             "mult": float(res.mult), "hand_type": int(res.hand_type)}
 
 
+def _can_take_pack_item(state: GameState, item) -> bool:
+    """Whether a revealed pack item can be added (a free slot of the right kind). A JOKER
+    needs a free joker slot; a CONSUMABLE needs a free consumable slot."""
+    if item.kind == PackItemKind.JOKER:
+        return len(state.jokers) < JOKER_SLOTS
+    return len(state.consumables) < state.consumable_slots
+
+
+def _open_pack_step(state: GameState, action):
+    """E3 OPEN_PACK sub-phase: PICK item i (add to the run, decrement picks) or SKIP_PACK
+    (end picking). Returns to SHOP once picks are exhausted or on SKIP."""
+    verb = action[0]
+    if verb == Verb.SKIP_PACK:
+        nxt = dataclasses.replace(state, phase=Phase.SHOP, pack_open=(), pack_picks=0)
+        return nxt, {"verb": "skip_pack"}
+    if verb == Verb.PICK:
+        i = action[1]
+        assert 0 <= i < len(state.pack_open), "no such pack item"
+        item = state.pack_open[i]
+        assert _can_take_pack_item(state, item), "no slot for this pack item"
+        common = dict(pack_open=tuple(o for k, o in enumerate(state.pack_open) if k != i))
+        if item.kind == PackItemKind.JOKER:
+            taken = dict(jokers=state.jokers + (item.payload,))
+            info = {"verb": "pick", "kind": int(PackItemKind.JOKER),
+                    "type_id": int(item.payload.type)}
+        else:
+            taken = dict(consumables=state.consumables + (item.payload,))
+            info = {"verb": "pick", "kind": int(PackItemKind.CONSUMABLE),
+                    "type_id": int(item.payload.type_id)}
+        picks = state.pack_picks - 1
+        if picks <= 0:        # picks exhausted -> resume the shop
+            nxt = dataclasses.replace(state, phase=Phase.SHOP, pack_open=(),
+                                      pack_picks=0, **taken)
+        else:
+            nxt = dataclasses.replace(state, pack_picks=picks, **common, **taken)
+        return nxt, info
+    raise ValueError(f"illegal open-pack action: {verb}")
+
+
 def _shop_step(state: GameState, action):
     verb = action[0]
     if verb == Verb.LEAVE_SHOP:
         return _advance_blind(state)
+    if verb == Verb.OPEN:        # E3: buy + open a booster pack -> enter OPEN_PACK
+        i = action[1]
+        assert 0 <= i < len(state.pack_offers), "no such pack offer"
+        pack = state.pack_offers[i]
+        assert state.money >= pack.cost, "cannot afford pack"
+        items, picks, rng = open_pack(pack, state.rng)
+        offers = tuple(p for k, p in enumerate(state.pack_offers) if k != i)
+        nxt = dataclasses.replace(state, money=state.money - pack.cost,
+                                  pack_offers=offers, phase=Phase.OPEN_PACK,
+                                  pack_open=items, pack_picks=picks, rng=rng,
+                                  shop_steps=state.shop_steps + 1)
+        return nxt, {"verb": "open", "kind": int(pack.kind), "size": int(pack.size),
+                     "cost": pack.cost, "shown": len(items), "picks": picks}
+    if verb == Verb.BUY_VOUCHER:        # E4: buy the offered voucher -> persistent run modifier
+        assert state.voucher_offer != 0, "no voucher offered"
+        voucher = VoucherType(state.voucher_offer)
+        assert state.money >= VOUCHER_COST, "cannot afford voucher"
+        assert prereq_met(state.vouchers, voucher), "voucher prerequisite not met"
+        vouchers = state.vouchers + (int(voucher),)
+        over = dict(money=state.money - VOUCHER_COST, vouchers=vouchers,
+                    voucher_offer=0, shop_steps=state.shop_steps + 1)
+        # Most voucher effects are DERIVED at use-site from `vouchers` (per-blind/shop/cap),
+        # so nothing else changes now. Crystal Ball's +1 consumable slot is a stored FIELD,
+        # so apply it immediately (other vouchers move no immediate field).
+        if voucher == VoucherType.CRYSTAL_BALL:
+            over["consumable_slots"] = state.consumable_slots + 1
+        nxt = dataclasses.replace(state, **over)
+        return nxt, {"verb": "buy_voucher", "type_id": int(voucher), "cost": VOUCHER_COST}
     if verb == Verb.BUY:
         i = action[1]
         assert 0 <= i < len(state.shop_offers), "no such shop offer"
         offer = state.shop_offers[i]
-        cost = joker_cost(offer.type)
+        cost = offer.cost
         assert state.money >= cost, "cannot afford"
-        assert len(state.jokers) < JOKER_SLOTS, "no joker slot"
         offers = tuple(o for k, o in enumerate(state.shop_offers) if k != i)
-        nxt = dataclasses.replace(state, money=state.money - cost,
-                                  jokers=state.jokers + (offer,), shop_offers=offers,
-                                  shop_steps=state.shop_steps + 1)
-        return nxt, {"verb": "buy", "joker": int(offer.type), "cost": cost}
+        common = dict(money=state.money - cost, shop_offers=offers,
+                      shop_steps=state.shop_steps + 1)
+        # Kind-aware acquisition: a JOKER fills a joker slot; any consumable kind (PLANET
+        # here, more in later phases) goes to a consumable slot (respecting the cap).
+        if offer.kind == ShopKind.JOKER:
+            assert len(state.jokers) < JOKER_SLOTS + extra_joker_slots(state.vouchers), \
+                "no joker slot"
+            nxt = dataclasses.replace(state, jokers=state.jokers + (
+                JokerState(type=offer.type_id),), **common)
+        else:
+            assert len(state.consumables) < state.consumable_slots, "no consumable slot"
+            # Store the consumable under its ConsumableKind (so USE/obs/replay read it
+            # correctly), not the raw ShopKind — the two enums number members differently.
+            con_kind = SHOP_TO_CONSUMABLE_KIND[offer.kind]
+            nxt = dataclasses.replace(state, consumables=state.consumables + (
+                Consumable(kind=con_kind, type_id=offer.type_id),), **common)
+        return nxt, {"verb": "buy", "kind": int(offer.kind),
+                     "type_id": int(offer.type_id), "cost": cost}
     if verb == Verb.SELL:
         i = action[1]
         assert 0 <= i < len(state.jokers), "no such joker"
@@ -442,9 +611,13 @@ def _shop_step(state: GameState, action):
                                   shop_steps=state.shop_steps + 1)
         return nxt, {"verb": "sell", "value": value}
     if verb == Verb.REROLL:
-        cost = reroll_cost(state.rerolls_done)
+        vs = state.vouchers
+        cost = reroll_cost(state.rerolls_done, discount=reroll_discount(vs))
         assert state.money >= cost, "cannot afford reroll"
-        offers, rng = generate_offers(state.rng, CARD_SLOTS)
+        # Re-rolled offers honor the same voucher-derived card-slot count + shop weights.
+        offers, rng = generate_offers(state.rng, CARD_SLOTS + extra_card_slots(vs),
+                                      tarot_mult=tarot_weight_mult(vs),
+                                      planet_mult=planet_weight_mult(vs))
         nxt = dataclasses.replace(state, money=state.money - cost, shop_offers=offers,
                                   rerolls_done=state.rerolls_done + 1, rng=rng,
                                   shop_steps=state.shop_steps + 1)

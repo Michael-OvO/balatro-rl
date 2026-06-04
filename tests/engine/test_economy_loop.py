@@ -3,6 +3,7 @@ from balatro_rl.engine.cards import Card
 from balatro_rl.engine.engine import Verb, reset, step
 from balatro_rl.engine.state import Phase
 from balatro_rl.engine.jokers.base import JokerType, JokerState
+from balatro_rl.engine.shop import ShopItem, ShopKind
 import balatro_rl.engine.jokers.library  # noqa: F401
 
 
@@ -17,8 +18,11 @@ def test_play_clear_shop_buy_leave_next_blind():
     s = _clearable(money=100, hands_left=2)
     s, info = step(s, (Verb.PLAY, (0, 1, 2, 3)))     # clear Small -> shop
     assert s.phase == Phase.SHOP
+    # Pin a JOKER offer so BUY adds a joker regardless of the random kind roll.
+    s = dataclasses.replace(s, shop_offers=(
+        ShopItem(int(ShopKind.JOKER), int(JokerType.BLUEPRINT), 10),))
     money_in_shop = s.money
-    s, _ = step(s, (Verb.BUY, 0))                    # buy first offer
+    s, _ = step(s, (Verb.BUY, 0))                    # buy the joker offer
     assert len(s.jokers) == 1 and s.money < money_in_shop
     s, _ = step(s, (Verb.LEAVE_SHOP, 0))             # leave -> Big blind
     assert s.phase == Phase.PLAYING and s.blind_index == 1

@@ -13,7 +13,7 @@ from __future__ import annotations
 
 from .jokers import library as _library  # noqa: F401  populates REGISTRY via @register
 from .bosses import BossEffect
-from .consumables import ConsumableKind, PlanetType
+from .consumables import ConsumableKind, PlanetType, TarotType
 from .jokers.base import JokerType, REGISTRY, Rarity
 
 _RARITY_NAME: dict[int, str] = {
@@ -177,6 +177,35 @@ PLANET_DESC: dict[int, str] = {
 }
 
 
+# Tarot cards (wiki: balatrowiki.org/w/Tarot_Cards). One line each. The Fool and The
+# Wheel of Fortune are DEFERRED in the engine (need run-history / joker-edition systems),
+# so their text notes that.
+TAROT_DESC: dict[int, str] = {
+    int(TarotType.THE_FOOL): "Creates the last Tarot/Planet used this run (deferred)",
+    int(TarotType.THE_MAGICIAN): "Enhances up to 2 selected cards to Lucky",
+    int(TarotType.THE_HIGH_PRIESTESS): "Creates up to 2 random Planet cards",
+    int(TarotType.THE_EMPRESS): "Enhances up to 2 selected cards to Mult",
+    int(TarotType.THE_EMPEROR): "Creates up to 2 random Tarot cards",
+    int(TarotType.THE_HIEROPHANT): "Enhances up to 2 selected cards to Bonus",
+    int(TarotType.THE_LOVERS): "Enhances 1 selected card to Wild",
+    int(TarotType.THE_CHARIOT): "Enhances 1 selected card to Steel",
+    int(TarotType.JUSTICE): "Enhances 1 selected card to Glass",
+    int(TarotType.THE_HERMIT): "Doubles money (max +$20)",
+    int(TarotType.THE_WHEEL_OF_FORTUNE): "1 in 4 to add an edition to a random Joker (deferred)",
+    int(TarotType.STRENGTH): "Increases rank of up to 2 selected cards by 1",
+    int(TarotType.THE_HANGED_MAN): "Destroys up to 2 selected cards",
+    int(TarotType.DEATH): "Converts the left selected card into the right",
+    int(TarotType.TEMPERANCE): "Gives total sell value of all Jokers (max $50)",
+    int(TarotType.THE_DEVIL): "Enhances 1 selected card to Gold",
+    int(TarotType.THE_TOWER): "Enhances 1 selected card to Stone",
+    int(TarotType.THE_STAR): "Converts up to 3 selected cards to Diamonds",
+    int(TarotType.THE_MOON): "Converts up to 3 selected cards to Clubs",
+    int(TarotType.THE_SUN): "Converts up to 3 selected cards to Hearts",
+    int(TarotType.JUDGEMENT): "Creates a random Joker",
+    int(TarotType.THE_WORLD): "Converts up to 3 selected cards to Spades",
+}
+
+
 def joker_desc(joker_type) -> str:
     """Effect description for a JokerType (or its int id). "" if unknown."""
     try:
@@ -196,9 +225,9 @@ def boss_desc(boss) -> str:
 def consumable_desc(kind: int, type_id: int) -> str:
     """Effect description for a consumable, dispatched on its ConsumableKind.
 
-    PLANET looks up PLANET_DESC; TAROT/SPECTRAL return a sensible placeholder
-    (their effects are not yet implemented in the engine). Returns "" on an
-    unknown kind/id rather than raising.
+    PLANET looks up PLANET_DESC, TAROT looks up TAROT_DESC; SPECTRAL returns a sensible
+    placeholder (not yet implemented in the engine). Returns "" on an unknown kind/id
+    rather than raising.
     """
     try:
         kind_i = int(kind)
@@ -208,7 +237,7 @@ def consumable_desc(kind: int, type_id: int) -> str:
     if kind_i == int(ConsumableKind.PLANET):
         return PLANET_DESC.get(type_i, "")
     if kind_i == int(ConsumableKind.TAROT):
-        return "Tarot card"
+        return TAROT_DESC.get(type_i, "Tarot card")
     if kind_i == int(ConsumableKind.SPECTRAL):
         return "Spectral card"
     return ""

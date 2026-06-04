@@ -17,7 +17,7 @@ from ..engine.cards import card_str
 from ..engine.descriptions import boss_desc, consumable_desc, joker_desc
 from ..engine.engine import Verb, explain_play
 from ..engine.jokers.base import JokerType
-from ..engine.shop import joker_cost, sell_value
+from ..engine.shop import sell_value
 from ..engine.state import GameState, Phase
 from ..envs.actions import decode
 from ..envs.balatro_env import BalatroEnv
@@ -45,9 +45,11 @@ def _consum_d(con) -> dict:
 
 
 def _consum_name(con) -> str:
-    from ..engine.consumables import ConsumableKind, PlanetType
+    from ..engine.consumables import ConsumableKind, PlanetType, TarotType
     if con.kind == ConsumableKind.PLANET:
         return PlanetType(con.type_id).name.title().replace("_", " ")
+    if con.kind == ConsumableKind.TAROT:
+        return TarotType(con.type_id).name.title().replace("_", " ")
     return f"{ConsumableKind(con.kind).name.title()} {con.type_id}"
 
 
@@ -59,8 +61,23 @@ def _boss_d(state) -> dict:
     return {"id": int(b), "name": b.name.replace("_", " ").title(), "desc": boss_desc(b)}
 
 
+def _offer_name(o) -> str:
+    """Readable name for a shop offer (joker via JokerType, planet via PlanetType,
+    tarot via TarotType)."""
+    from ..engine.consumables import PlanetType, TarotType
+    from ..engine.shop import ShopKind
+    if o.kind == ShopKind.JOKER:
+        return JokerType(o.type_id).name
+    if o.kind == ShopKind.PLANET:
+        return PlanetType(o.type_id).name.title().replace("_", " ")
+    if o.kind == ShopKind.TAROT:
+        return TarotType(o.type_id).name.title().replace("_", " ")
+    return f"{ShopKind(o.kind).name.title()} {o.type_id}"
+
+
 def _offer_d(o) -> dict:
-    return {"type": int(o.type), "name": JokerType(o.type).name, "cost": joker_cost(o.type)}
+    return {"kind": int(o.kind), "type_id": int(o.type_id),
+            "name": _offer_name(o), "cost": int(o.cost)}
 
 
 def action_label(action_id: int) -> str:
@@ -91,7 +108,7 @@ def render_board(state: GameState) -> str:
         f"Hand:   {hand}",
     ]
     if int(state.phase) == int(Phase.SHOP) and state.shop_offers:
-        offers = "  ".join(f"[{JokerType(o.type).name} ${joker_cost(o.type)}]" for o in state.shop_offers)
+        offers = "  ".join(f"[{_offer_name(o)} ${o.cost}]" for o in state.shop_offers)
         lines.append(f"Shop:   {offers}")
     return "\n".join(lines)
 

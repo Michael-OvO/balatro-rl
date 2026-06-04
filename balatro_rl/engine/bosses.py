@@ -103,6 +103,11 @@ def boss_req_mult(boss: BossEffect) -> float:
     return BOSS_INFO[boss].req_mult
 
 
+def is_finisher(boss: BossEffect) -> bool:
+    """Whether this is a showdown/finisher boss (ante 8/16/...; pays $8 at cash-out)."""
+    return BOSS_INFO[boss].is_finisher
+
+
 def eligible_bosses(ante: int) -> list[BossEffect]:
     """The selectable boss pool for an ante: finishers on ante 8 (every 8th ante), else the
     regular bosses whose min_ante has been reached. NONE is never selectable."""

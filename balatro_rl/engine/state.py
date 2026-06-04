@@ -17,6 +17,11 @@ class Phase(IntEnum):
     WON = 1
     LOST = 2
     SHOP = 3
+    # E3: OPEN_PACK is the booster-pack sub-phase (pick K-of-M revealed items). The obs
+    # encoder guards `phase < N_PHASES=4`, so OPEN_PACK gets NO phase one-hot and g[16] is
+    # untouched — the agent stays blind to packs (it's only ever reached via a direct
+    # engine.step, since legal_actions never offers Verb.OPEN until the E5 widening).
+    OPEN_PACK = 4
 
 
 @dataclasses.dataclass(frozen=True, slots=True)
@@ -64,3 +69,21 @@ class GameState:
     # can't see or USE them until the Phase D obs/action widening.
     consumables: tuple = ()      # tuple[Consumable, ...]
     consumable_slots: int = 2
+    # E3 booster packs. `pack_offers` are the shop's pack slots (tuple[Pack, ...]), generated
+    # alongside the card offers. When a pack is BOUGHT (Verb.OPEN), the engine enters
+    # Phase.OPEN_PACK: `pack_open` holds the revealed items (tuple[PackItem, ...]) and
+    # `pack_picks` the remaining picks; PICK/SKIP_PACK drain them, then phase returns to SHOP.
+    # All default empty/0 -> byte-identical for directly-constructed states; the agent is
+    # blind (legal_actions never offers Verb.OPEN) until the E5 obs/action widening.
+    pack_offers: tuple = ()      # tuple[Pack, ...] offered in the shop
+    pack_open: tuple = ()        # tuple[PackItem, ...] revealed during OPEN_PACK
+    pack_picks: int = 0          # remaining picks during OPEN_PACK
+    # E4 vouchers. `vouchers` is the owned set (a tuple of VoucherType ids) and the SINGLE
+    # SOURCE OF TRUTH for every persistent per-run modifier (extra hands/discards/slots,
+    # interest cap, reroll discount, shop weights) — those are DERIVED from it where used,
+    # never stored separately. `voucher_offer` is the shop's single voucher slot (0 = none
+    # offered; otherwise a VoucherType id). Both default empty/0 -> byte-identical for
+    # directly-constructed states; the agent is blind (legal_actions never offers
+    # Verb.BUY_VOUCHER) until the E5 obs/action widening.
+    vouchers: tuple = ()         # tuple[int, ...] owned VoucherType ids
+    voucher_offer: int = 0       # the shop's voucher slot (0 = none; else a VoucherType id)

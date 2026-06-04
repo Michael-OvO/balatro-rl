@@ -38,13 +38,15 @@ def test_every_planet_maps_to_a_hand_type():
 
 def test_apply_planet_returns_leveled_levels():
     st = reset(seed=0)
-    overrides = apply_consumable(st, planet(PlanetType.MERCURY))   # -> PAIR
+    # E2: apply_consumable now returns (overrides, rng); the Planet path threads rng unchanged.
+    overrides, rng = apply_consumable(st, planet(PlanetType.MERCURY))   # -> PAIR
     assert overrides["levels"][int(HandType.PAIR)] == st.levels[int(HandType.PAIR)] + 1
+    assert rng is None
 
 
 def test_apply_consumable_unimplemented_kind_raises():
     with pytest.raises(NotImplementedError):
-        apply_consumable(reset(seed=0), Consumable(kind=int(ConsumableKind.TAROT), type_id=1))
+        apply_consumable(reset(seed=0), Consumable(kind=int(ConsumableKind.SPECTRAL), type_id=1))
 
 
 # ============================================================================
