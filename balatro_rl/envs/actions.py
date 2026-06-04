@@ -1,14 +1,25 @@
 """Fixed flat action space + legal mask over the engine's variable actions.
 
-Layout (NUM_ACTIONS = 465):
+Layout (NUM_ACTIONS = 706):
   [0, 218)        PLAY    subset = _SUBSETS[id]
   [218, 436)      DISCARD subset = _SUBSETS[id - 218]
   SHOP_BASE=436:
-    +0..+1        BUY  offer slot 0..1   (CARD_SLOTS)
-    +2..+6        SELL joker slot 0..4   (JOKER_SLOTS)
-    +7            REROLL
-    +8..+27       REORDER pair _PAIRS[k]  (20 ordered (i,j), i!=j, over JOKER_SLOTS)
-    +28           LEAVE_SHOP
+    +0..+1        BUY  offer slot 0..1   (CARD_SLOTS; kind-agnostic: joker OR consumable)
+    +2..+7        SELL joker slot 0..5   (MAX_JOKERS=6, incl. the Antimatter slot)
+    +8            REROLL
+    +9..+38       REORDER pair _PAIRS[k]  (30 ordered (i,j), i!=j, over MAX_JOKERS)
+    +39           LEAVE_SHOP
+  USE0=476:
+    +0..+2        USE consumable slot 0..2 (MAX_CONSUM=3; no-target apply / arm a targeting Tarot)
+  --- E5 widening blocks ---
+  USE_TARGET0=479:
+    +0..+217      USE_TARGET subset = _SUBSETS[id - 479] (apply the ARMED targeting Tarot)
+  OPEN0=697:
+    +0..+1        OPEN pack offer slot 0..1 (MAX_PACK)
+  PICK0=699:
+    +0..+4        PICK pack item slot 0..4 (MAX_PACK_ITEMS)
+  SKIP_PACK=704
+  BUY_VOUCHER=705
 Subsets are enumerated over MAX_HAND=8 slots; subsets referencing absent hand
 slots are simply never legal (the engine never offers them), so they mask out.
 """
@@ -22,9 +33,11 @@ from ..engine.engine import Verb, legal_actions
 
 MAX_HAND = 8
 MAX_SELECT = 5
-MAX_JOKERS = 5     # JOKER_SLOTS
+MAX_JOKERS = 6     # JOKER_SLOTS (5) + the Antimatter voucher's +1; the real-game cap
 MAX_SHOP = 2       # CARD_SLOTS
-MAX_CONSUM = 2     # consumable slots (USE action ids)
+MAX_CONSUM = 3     # consumable slots: base 2 + the Crystal Ball voucher's +1 (USE action ids)
+MAX_PACK = 2       # PACK_SLOTS (booster-pack offer slots)
+MAX_PACK_ITEMS = 5  # most an OPEN_PACK ever reveals (Jumbo/Mega = 5 shown)
 
 _SUBSETS: list[tuple[int, ...]] = [
     c for size in range(1, MAX_SELECT + 1) for c in itertools.combinations(range(MAX_HAND), size)
@@ -36,13 +49,18 @@ _PAIRS: list[tuple[int, int]] = [(i, j) for i in range(MAX_JOKERS) for j in rang
 _PAIR_INDEX: dict[tuple[int, int], int] = {p: k for k, p in enumerate(_PAIRS)}
 
 SHOP_BASE = 2 * PLAY_N                  # 436
-_BUY0 = SHOP_BASE                       # +0..+1
-_SELL0 = SHOP_BASE + MAX_SHOP           # +2..+6
-_REROLL = _SELL0 + MAX_JOKERS           # +7
-_REORDER0 = _REROLL + 1                 # +8..+27
-_LEAVE = _REORDER0 + len(_PAIRS)        # +28
-_USE0 = _LEAVE + 1                       # USE consumable 0..MAX_CONSUM-1 (465..466)
-NUM_ACTIONS = _USE0 + MAX_CONSUM         # 467
+_BUY0 = SHOP_BASE                       # +0..+1   (436,437)
+_SELL0 = SHOP_BASE + MAX_SHOP           # +2..+7   (438..443; MAX_JOKERS=6)
+_REROLL = _SELL0 + MAX_JOKERS           # +8       (444)
+_REORDER0 = _REROLL + 1                 # +9..+38  (445..474; 30 pairs)
+_LEAVE = _REORDER0 + len(_PAIRS)        # +39      (475)
+_USE0 = _LEAVE + 1                       # USE consumable 0..MAX_CONSUM-1 (476..478)
+_USE_TARGET0 = _USE0 + MAX_CONSUM        # USE_TARGET subset 0..217 (479..696)
+_OPEN0 = _USE_TARGET0 + PLAY_N           # OPEN pack 0..1 (697..698)
+_PICK0 = _OPEN0 + MAX_PACK               # PICK item 0..4 (699..703)
+_SKIP_PACK = _PICK0 + MAX_PACK_ITEMS     # 704
+_BUY_VOUCHER = _SKIP_PACK + 1            # 705
+NUM_ACTIONS = _BUY_VOUCHER + 1           # 706
 
 
 def decode(action_id: int):
@@ -61,8 +79,18 @@ def decode(action_id: int):
         return Verb.REORDER, _PAIRS[action_id - _REORDER0]
     if action_id == _LEAVE:
         return Verb.LEAVE_SHOP, 0
-    if action_id < NUM_ACTIONS:
+    if action_id < _USE_TARGET0:
         return Verb.USE, action_id - _USE0
+    if action_id < _OPEN0:
+        return Verb.USE_TARGET, _SUBSETS[action_id - _USE_TARGET0]
+    if action_id < _PICK0:
+        return Verb.OPEN, action_id - _OPEN0
+    if action_id < _SKIP_PACK:
+        return Verb.PICK, action_id - _PICK0
+    if action_id == _SKIP_PACK:
+        return Verb.SKIP_PACK, 0
+    if action_id == _BUY_VOUCHER:
+        return Verb.BUY_VOUCHER, 0
     raise ValueError(f"action_id out of range: {action_id}")
 
 
@@ -84,6 +112,16 @@ def encode_action(verb, arg) -> int:
         return _LEAVE
     if verb == Verb.USE:
         return _USE0 + arg
+    if verb == Verb.USE_TARGET:
+        return _USE_TARGET0 + _SUBSET_INDEX[tuple(arg)]
+    if verb == Verb.OPEN:
+        return _OPEN0 + arg
+    if verb == Verb.PICK:
+        return _PICK0 + arg
+    if verb == Verb.SKIP_PACK:
+        return _SKIP_PACK
+    if verb == Verb.BUY_VOUCHER:
+        return _BUY_VOUCHER
     raise ValueError(f"unknown verb: {verb}")
 
 
@@ -91,21 +129,30 @@ def legal_mask(state) -> np.ndarray:
     """Boolean array of length NUM_ACTIONS: True where the flat id is legal now.
 
     The flat action space only enumerates card subsets over MAX_HAND=8 slots.
-    A hand of a different size is handled gracefully (no assert): PLAY/DISCARD
-    actions are clamped/masked to the present min(len(hand), MAX_HAND) slots, so a
-    larger hand only offers subsets over the first 8 slots (indices >= MAX_HAND
-    stay illegal because they have no flat id) and a smaller hand offers fewer
-    subsets (absent slots stay illegal). For the current game (hand always 8) the
-    mask is byte-identical to enumerating every engine action directly.
+    A hand of a different size is handled gracefully (no assert): PLAY/DISCARD/
+    USE_TARGET actions are clamped/masked to the present min(len(hand), MAX_HAND)
+    slots, so a larger hand only offers subsets over the first 8 slots (indices >=
+    MAX_HAND stay illegal because they have no flat id) and a smaller hand offers
+    fewer subsets. Shop/pack slots beyond their fixed caps likewise mask out.
     """
     mask = np.zeros(NUM_ACTIONS, dtype=np.bool_)
     for verb, arg in legal_actions(state):
-        # Subset actions referencing a slot >= MAX_HAND have no flat encoding;
-        # skip them (they mask out) instead of raising. Non-subset (shop) args
-        # are scalars/pairs over fixed-size slots and always encode.
-        if verb in (Verb.PLAY, Verb.DISCARD) and any(i >= MAX_HAND for i in arg):
+        # Subset actions referencing a slot >= MAX_HAND have no flat encoding; skip them
+        # (they mask out) instead of raising. Fixed-size shop/pack/consumable slots beyond
+        # their caps likewise have no flat id.
+        if verb in (Verb.PLAY, Verb.DISCARD, Verb.USE_TARGET) and any(i >= MAX_HAND for i in arg):
             continue
-        if verb == Verb.USE and arg >= MAX_CONSUM:   # no flat id for slots beyond MAX_CONSUM
+        if verb == Verb.USE and arg >= MAX_CONSUM:
+            continue
+        if verb == Verb.OPEN and arg >= MAX_PACK:
+            continue
+        if verb == Verb.PICK and arg >= MAX_PACK_ITEMS:
+            continue
+        # Defensive: a joker slot beyond MAX_JOKERS has no flat id (can't happen at the current
+        # caps, but degrades gracefully if a future voucher raises the engine cap past it).
+        if verb == Verb.SELL and arg >= MAX_JOKERS:
+            continue
+        if verb == Verb.REORDER and any(i >= MAX_JOKERS for i in arg):
             continue
         mask[encode_action(verb, arg)] = True
     return mask

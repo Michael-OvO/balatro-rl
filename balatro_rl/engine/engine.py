@@ -22,7 +22,7 @@ from .bosses import (
     is_finisher, select_boss,
 )
 from .cards import Enhancement, standard_deck
-from .consumables import Consumable, apply_consumable, consumable_needs_target
+from .consumables import Consumable, apply_consumable, consumable_needs_target, max_targets
 from .economy import blind_reward, interest, MONEY_PER_UNUSED_HAND
 from .hands import evaluate
 from .jokers.base import HandEvents, JokerState, NO_RULES, REGISTRY, aggregate_rules
@@ -67,6 +67,8 @@ class Verb(IntEnum):
     SKIP_PACK = 10  # in OPEN_PACK: end picking -> back to SHOP
     # E4 vouchers (agent BLIND — never emitted by legal_actions; direct engine.step only):
     BUY_VOUCHER = 11  # in SHOP: buy the offered voucher -> apply a persistent run modifier
+    # E5 targeting two-step: apply the armed (pending) targeting Tarot to the selected hand cards.
+    USE_TARGET = 12   # payload = target hand indices (a subset); resolves state.pending_consumable
 
 
 def _draw(hand: list, deck: list, hand_size: int) -> tuple[list, list]:
@@ -148,18 +150,22 @@ def reset(seed: int, scale: float = 1.0, card_mods=None,
 def legal_actions(state: GameState) -> list[tuple[Verb, tuple[int, ...]]]:
     if state.done:
         return []
-    # Consumables can be USEd in any phase (a free action). Empty by default -> no USE
-    # actions, so the action space is byte-identical until consumables are acquired.
-    # E2: card-targeting Tarots are WITHHELD here — their USE needs target hand indices,
-    # which the agent can't select until the Phase E5 obs/action widening. They remain
-    # reachable via a direct engine.step((Verb.USE, (ci, *targets))). Planets and no-target
-    # Tarots (Hermit/Temperance/High Priestess/Emperor/Judgement) are offered normally.
+    # E5 targeting two-step: while a card-targeting Tarot is ARMED, the ONLY legal moves are the
+    # target-subset selections (USE_TARGET). It is only ever armed in PLAYING with a non-empty
+    # hand, so size-1 always exists -> the agent is never stuck. Bounded to the Tarot's reach.
+    if state.pending_consumable >= 0:
+        mt = max_targets(state.consumables[state.pending_consumable])
+        n = len(state.hand)
+        return [(Verb.USE_TARGET, combo)
+                for size in range(1, min(mt, n) + 1)
+                for combo in itertools.combinations(range(n), size)]
+    # No-target consumables (Planets, no-target Tarots) USE in any phase — a free action.
+    # Empty by default -> no USE actions (byte-identical until consumables are acquired).
     use = [(Verb.USE, i) for i, c in enumerate(state.consumables)
            if not consumable_needs_target(c)]
     if state.phase == Phase.OPEN_PACK:
-        # E3: pick K-of-M revealed items. Only items that CAN be added are pickable (a free
-        # joker/consumable slot); SKIP_PACK always ends picking. This phase is only ever
-        # reached via a direct engine.step((OPEN, ...)) — the agent is blind to packs until E5.
+        # E3/E5: pick K-of-M revealed items. Only items that CAN be added are pickable (a free
+        # joker/consumable slot); SKIP_PACK always ends picking.
         actions = list(use)
         for i, item in enumerate(state.pack_open):
             if _can_take_pack_item(state, item):
@@ -170,16 +176,24 @@ def legal_actions(state: GameState) -> list[tuple[Verb, tuple[int, ...]]]:
         if state.shop_steps >= SHOP_ACTION_CAP:
             return [(Verb.LEAVE_SHOP, 0)]          # bound shop dithering -> force progress
         actions = use + [(Verb.LEAVE_SHOP, 0)]
-        # E1: the agent stays blind to consumable offers — only JOKER-kind offers are
-        # buyable from the policy (a free joker slot + affordable). Consumable buys are
-        # reachable only via a direct engine.step((Verb.BUY, i)), not offered here. The joker
-        # cap is voucher-raised (Antimatter +1); reroll cost is voucher-discounted (Reroll
-        # Surplus/Glut). E4: BUY_VOUCHER is NOT emitted here — the agent stays voucher-blind.
+        # E5: the agent now BUYS everything the shop offers. A JOKER offer needs a free joker
+        # slot (voucher-raised by Antimatter); a consumable offer needs a free consumable slot.
         joker_cap = JOKER_SLOTS + extra_joker_slots(state.vouchers)
         for i, offer in enumerate(state.shop_offers):
-            if (offer.kind == ShopKind.JOKER and state.money >= offer.cost
-                    and len(state.jokers) < joker_cap):
+            if state.money < offer.cost:
+                continue
+            if offer.kind == ShopKind.JOKER:
+                if len(state.jokers) < joker_cap:
+                    actions.append((Verb.BUY, i))
+            elif len(state.consumables) < state.consumable_slots:
                 actions.append((Verb.BUY, i))
+        # E5: booster packs (buy + open into the OPEN_PACK sub-phase) and the single voucher slot.
+        for i, pack in enumerate(state.pack_offers):
+            if state.money >= pack.cost:
+                actions.append((Verb.OPEN, i))
+        if (state.voucher_offer and state.money >= VOUCHER_COST
+                and prereq_met(state.vouchers, VoucherType(state.voucher_offer))):
+            actions.append((Verb.BUY_VOUCHER, 0))
         for i in range(len(state.jokers)):
             actions.append((Verb.SELL, i))
         if state.money >= reroll_cost(state.rerolls_done,
@@ -191,7 +205,12 @@ def legal_actions(state: GameState) -> list[tuple[Verb, tuple[int, ...]]]:
                 if i != j:
                     actions.append((Verb.REORDER, (i, j)))
         return actions
+    # PLAYING. Card-targeting Tarots are now ARM-able here (hand non-empty) via a bare (USE, ci);
+    # stepping it enters the pending two-step above. No-target consumables stay in `use`.
     actions: list[tuple[Verb, tuple[int, ...]]] = list(use)
+    if state.hand:
+        actions += [(Verb.USE, i) for i, c in enumerate(state.consumables)
+                    if consumable_needs_target(c)]
     n = len(state.hand)
     # Boss PLAY restrictions (Psychic exactly-5 / Eye no-repeat / Mouth single-type). Only
     # engaged on those boss blinds; off them `play_filter` is False and the loop is the
@@ -330,19 +349,26 @@ def _use_consumable(state: GameState, ci: int, targets=()) -> tuple[GameState, d
 
 def step(state: GameState, action: tuple[Verb, tuple[int, ...]]) -> tuple[GameState, dict]:
     assert not state.done, "step() called on a terminal state"
+    if action[0] == Verb.USE_TARGET:   # E5: apply the ARMED targeting Tarot to the selected cards
+        assert state.pending_consumable >= 0, "no consumable armed for targeting"
+        ci, targets = state.pending_consumable, tuple(action[1])
+        # Clear pending FIRST so the successor carries no stale arm, then apply.
+        return _use_consumable(dataclasses.replace(state, pending_consumable=-1), ci, targets)
     if action[0] == Verb.USE:        # consumables are usable in any phase (free action)
-        # USE-with-targets encoding: the payload is either a bare consumable index
-        #   (Verb.USE, ci)                 -> no targets (Planets, no-target Tarots)
-        # or a tuple whose head is the index and tail is the target hand indices
-        #   (Verb.USE, (ci, *target_idx))  -> card-targeting Tarots
-        # The agent only ever emits the bare form (legal_actions withholds targeting
-        # USEs until E5); the (ci, *targets) form is reachable via direct engine.step.
+        # USE encoding has three forms:
+        #   (Verb.USE, (ci, *target_idx))  -> direct apply-with-targets (E2 scripted path / tests)
+        #   (Verb.USE, ci)  on a no-target consumable  -> apply now (Planets, no-target Tarots)
+        #   (Verb.USE, ci)  on a card-targeting Tarot   -> ARM the two-step (E5): set pending, then
+        #                                                  the agent picks (USE_TARGET, subset)
         payload = action[1]
         if isinstance(payload, tuple):
-            ci, targets = payload[0], payload[1:]
-        else:
-            ci, targets = payload, ()
-        return _use_consumable(state, ci, targets)
+            return _use_consumable(state, payload[0], payload[1:])
+        ci = payload
+        assert 0 <= ci < len(state.consumables), "no such consumable"
+        if consumable_needs_target(state.consumables[ci]):
+            assert state.hand, "no hand cards to target"
+            return dataclasses.replace(state, pending_consumable=ci), {"verb": "use_arm", "ci": ci}
+        return _use_consumable(state, ci, ())
     if state.phase == Phase.OPEN_PACK:        # E3: pick K-of-M revealed pack items
         return _open_pack_step(state, action)
     if state.phase == Phase.SHOP:
@@ -386,7 +412,8 @@ def step(state: GameState, action: tuple[Verb, tuple[int, ...]]) -> tuple[GameSt
     boss = BossEffect(state.boss)
     debuffed = boss_debuffed_idx(boss, selected, rules) if state.boss else ()
     res = score_play(selected, jokers=state.jokers, held=tuple(held),
-                     joker_slots=JOKER_SLOTS, money=state.money,
+                     joker_slots=JOKER_SLOTS + extra_joker_slots(state.vouchers),
+                     money=state.money,
                      hands_left=state.hands_left, discards_left=state.discards_left,
                      deck_count=len(state.deck),
                      hand_plays_run=state.hand_plays_run,
@@ -494,7 +521,8 @@ def explain_play(state: GameState, idx) -> dict:
     debuffed = boss_debuffed_idx(boss, selected, rules) if state.boss else ()
     trace: list = []
     res = score_play(selected, jokers=state.jokers, held=held,
-                     joker_slots=JOKER_SLOTS, money=state.money,
+                     joker_slots=JOKER_SLOTS + extra_joker_slots(state.vouchers),
+                     money=state.money,
                      hands_left=state.hands_left, discards_left=state.discards_left,
                      deck_count=len(state.deck),
                      hand_plays_run=state.hand_plays_run, hand_plays_round=state.hand_plays_round,
@@ -507,9 +535,10 @@ def explain_play(state: GameState, idx) -> dict:
 
 def _can_take_pack_item(state: GameState, item) -> bool:
     """Whether a revealed pack item can be added (a free slot of the right kind). A JOKER
-    needs a free joker slot; a CONSUMABLE needs a free consumable slot."""
+    needs a free joker slot (voucher-raised by Antimatter, matching the shop BUY check); a
+    CONSUMABLE needs a free consumable slot."""
     if item.kind == PackItemKind.JOKER:
-        return len(state.jokers) < JOKER_SLOTS
+        return len(state.jokers) < JOKER_SLOTS + extra_joker_slots(state.vouchers)
     return len(state.consumables) < state.consumable_slots
 
 

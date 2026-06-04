@@ -148,11 +148,13 @@ def test_legal_actions_open_pack_emits_pick_and_skip():
     assert all(a[0] in (Verb.PICK, Verb.SKIP_PACK) or a[0] == Verb.USE for a in actions)
 
 
-def test_legal_actions_shop_never_offers_open():
-    s = _shop(money=100, hands_left=1)
-    # Even with pack_offers present, the policy stays blind: no Verb.OPEN.
-    s = dataclasses.replace(s, pack_offers=(_arcana_mega(),))
-    assert all(a[0] != Verb.OPEN for a in legal_actions(s))
+def test_legal_actions_shop_offers_open_when_affordable():
+    # E5: the policy now sees pack offers — OPEN is legal when the pack is affordable...
+    s = dataclasses.replace(_shop(money=100, hands_left=1), pack_offers=(_arcana_mega(),))
+    assert (Verb.OPEN, 0) in legal_actions(s)
+    # ...and withheld when it isn't (Mega costs $8; set money AFTER cash-out so it sticks).
+    poor = dataclasses.replace(_shop(hands_left=1), money=5, pack_offers=(_arcana_mega(),))
+    assert all(a[0] != Verb.OPEN for a in legal_actions(poor))
 
 
 def test_open_pack_full_consumes_remaining_after_picks():

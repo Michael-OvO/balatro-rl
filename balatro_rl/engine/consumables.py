@@ -150,6 +150,15 @@ def consumable_needs_target(con: Consumable) -> bool:
             and con.type_id in CARD_TARGETING_TAROTS)
 
 
+def max_targets(con: Consumable) -> int:
+    """How many hand cards a card-targeting Tarot selects (its USE_TARGET subset size cap);
+    0 for non-targeting consumables. Used by the E5 pending two-step to bound the offered
+    target subsets to the Tarot's reach (e.g. The Magician 2, The Lovers 1, the suit Tarots 3)."""
+    if not consumable_needs_target(con):
+        return 0
+    return _TAROT_MAX_TARGETS[TarotType(con.type_id)]
+
+
 def _bump_rank(rank: int) -> int:
     """Strength's rank +1 with Ace wrap: Ace(14) -> 2, King(13) -> Ace(14), else +1."""
     if rank >= RANK_MAX:        # Ace wraps to 2
