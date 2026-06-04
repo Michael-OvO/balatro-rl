@@ -21,6 +21,7 @@ import os
 from collections import Counter
 
 from balatro_rl.engine.cards import Edition, Enhancement, Seal
+from balatro_rl.engine import descriptions   # live effect-text lookup (back-fills pre-V3 recordings)
 from . import assets   # optional wiki art cache (data-URI images); falls back to CSS tiles
 
 # The picker lists episodes from here (where the sweep writes <run>.episode.json).
@@ -357,7 +358,8 @@ def _jokers_html(cur, prev):
     for j in cur_j:
         c = f' <span class="jk-cnt">&times;{j["counter"]:.0f}</span>' if j.get("counter") else ""
         cls = " add" if cur_names[j["name"]] > prev_names[j["name"]] else ""
-        desc = j.get("desc", "")
+        # Prefer the recorded desc; back-fill from the joker type for pre-V3 recordings.
+        desc = j.get("desc") or (descriptions.joker_desc(j["type"]) if j.get("type") is not None else "")
         desc_html = f'<span class="jk-desc">{html.escape(desc)}</span>' if desc else ""
         art = assets.joker(j.get("type")) if j.get("type") is not None else None
         art_html = f'<img class="jk-art" src="{art}" alt="">' if art else ""
@@ -378,7 +380,7 @@ def _boss_banner(s):
     if not boss:
         return ""
     name = html.escape(boss.get("name", "Boss Blind"))
-    desc = html.escape(boss.get("desc", ""))
+    desc = html.escape(boss.get("desc") or (descriptions.boss_desc(boss["id"]) if "id" in boss else ""))
     sep = " &mdash; " if desc else ""
     bimg = assets.boss(boss.get("id")) if boss.get("id") else None
     ico = (f'<img class="boss-ico-img" src="{bimg}" alt="">' if bimg
@@ -396,7 +398,8 @@ def _consumables_html(s):
         return ""
     chips = []
     for c in cons:
-        desc = c.get("desc", "")
+        desc = c.get("desc") or (descriptions.consumable_desc(c["kind"], c["type_id"])
+                                 if "kind" in c and "type_id" in c else "")
         desc_html = f'<span class="con-desc">{html.escape(desc)}</span>' if desc else ""
         art = assets.consumable(c.get("kind", 0), c.get("type_id", 0))
         art_html = f'<img class="con-art" src="{art}" alt="">' if art else ""
