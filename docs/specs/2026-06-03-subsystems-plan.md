@@ -25,12 +25,27 @@ Full design + critique: workflow `wf_0e0732b9-3b7`.
   C3 draw/state (Hook/Serpent/Tooth/Ox) (`036ca73`). Debuff semantics corrected to
   wiki-true (debuffed card fully inert). **593 tests, zero regressions, all byte-compatible**
   — the validated ante-7 agent still runs unchanged on its checkpoint.
-- **Phase D (THE RETRAIN)** — NOT STARTED. Pauses for user confirmation before training.
+- **Phase D BUILD (obs/action/network widening + consumables engine)** — DONE.
+  D1a level-aware scoring (`ea1b697`); D1b consumables engine + 12 Planet cards + USE verb
+  (`cf7abd5`); D2 obs/action/network widening — CARD_FEAT 17→37, boss_onehot, consumable
+  streams, NUM_ACTIONS 465→467 with USE ids, network consumable Embed+pool + boss block +
+  USE head (`ff5150b`); `enable_bosses` flag threaded through env/vec/train (`b78bbde`).
+  **All byte-compatible** (plain game unchanged); the agent can now *represent* mods/bosses/
+  consumables and *use* Planets.
+- **Phase D EXPOSURE (training-env acquisition so the retrain can LEARN the new content)** —
+  next build step. Pre-seed random enhancements into the deck + grant consumables, behind
+  env/train flags (default OFF → byte-compatible). Without this the agent sees the new obs
+  features as always-zero in training and learns nothing new about them.
+- **Phase D RETRAIN** — pending; PAUSES for user confirmation before the training run.
 
-Deferred into Phase D (need agent obs / levels to matter): face-down bosses (House/Wheel/
-Fish/Mark), The Pillar (cross-blind tracking), The Arm (level scoring), finisher effects
-(Amber Acorn/Verdant Leaf/Crimson Heart/Cerulean Bell — Violet Vessel's 6x req is done),
-BLUE/PURPLE seals (need consumables).
+Deferred (need agent obs / levels — now available — or further work): face-down bosses
+(House/Wheel/Fish/Mark), The Pillar (cross-blind tracking), The Arm (now scoreable via D1a
+level scoring), finisher effects (Violet Vessel's 6x req is done), BLUE/PURPLE seals + Tarot/
+Spectral consumables, shop acquisition of consumables.
+
+(Separately, the replay viewer was substantially upgraded — score-breakdown trace,
+joker/boss/planet descriptions, real wiki art, redesigned UI — to make retrain replays easy
+to read and debug. Not part of the subsystems plan; see PRs #11, #12.)
 
 ## Build order
 
