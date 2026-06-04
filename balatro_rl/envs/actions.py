@@ -1,25 +1,25 @@
 """Fixed flat action space + legal mask over the engine's variable actions.
 
-Layout (NUM_ACTIONS = 694):
+Layout (NUM_ACTIONS = 705):
   [0, 218)        PLAY    subset = _SUBSETS[id]
   [218, 436)      DISCARD subset = _SUBSETS[id - 218]
   SHOP_BASE=436:
     +0..+1        BUY  offer slot 0..1   (CARD_SLOTS; kind-agnostic: joker OR consumable)
-    +2..+6        SELL joker slot 0..4   (JOKER_SLOTS)
-    +7            REROLL
-    +8..+27       REORDER pair _PAIRS[k]  (20 ordered (i,j), i!=j, over JOKER_SLOTS)
-    +28           LEAVE_SHOP
-  USE0=465:
+    +2..+7        SELL joker slot 0..5   (MAX_JOKERS=6, incl. the Antimatter slot)
+    +8            REROLL
+    +9..+38       REORDER pair _PAIRS[k]  (30 ordered (i,j), i!=j, over MAX_JOKERS)
+    +39           LEAVE_SHOP
+  USE0=476:
     +0..+1        USE consumable slot 0..1 (MAX_CONSUM; no-target apply / arm a targeting Tarot)
   --- E5 widening blocks ---
-  USE_TARGET0=467:
-    +0..+217      USE_TARGET subset = _SUBSETS[id - 467] (apply the ARMED targeting Tarot)
-  OPEN0=685:
+  USE_TARGET0=478:
+    +0..+217      USE_TARGET subset = _SUBSETS[id - 478] (apply the ARMED targeting Tarot)
+  OPEN0=696:
     +0..+1        OPEN pack offer slot 0..1 (MAX_PACK)
-  PICK0=687:
+  PICK0=698:
     +0..+4        PICK pack item slot 0..4 (MAX_PACK_ITEMS)
-  SKIP_PACK=692
-  BUY_VOUCHER=693
+  SKIP_PACK=703
+  BUY_VOUCHER=704
 Subsets are enumerated over MAX_HAND=8 slots; subsets referencing absent hand
 slots are simply never legal (the engine never offers them), so they mask out.
 """
@@ -33,7 +33,7 @@ from ..engine.engine import Verb, legal_actions
 
 MAX_HAND = 8
 MAX_SELECT = 5
-MAX_JOKERS = 5     # JOKER_SLOTS
+MAX_JOKERS = 6     # JOKER_SLOTS (5) + the Antimatter voucher's +1; the real-game cap
 MAX_SHOP = 2       # CARD_SLOTS
 MAX_CONSUM = 2     # consumable slots (USE action ids)
 MAX_PACK = 2       # PACK_SLOTS (booster-pack offer slots)
@@ -147,6 +147,12 @@ def legal_mask(state) -> np.ndarray:
         if verb == Verb.OPEN and arg >= MAX_PACK:
             continue
         if verb == Verb.PICK and arg >= MAX_PACK_ITEMS:
+            continue
+        # Defensive: a joker slot beyond MAX_JOKERS has no flat id (can't happen at the current
+        # caps, but degrades gracefully if a future voucher raises the engine cap past it).
+        if verb == Verb.SELL and arg >= MAX_JOKERS:
+            continue
+        if verb == Verb.REORDER and any(i >= MAX_JOKERS for i in arg):
             continue
         mask[encode_action(verb, arg)] = True
     return mask

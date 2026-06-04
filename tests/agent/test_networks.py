@@ -45,7 +45,7 @@ def test_static_subset_cnt_matches_row_lengths():
 
 
 def test_static_pair_columns():
-    assert PAIR_I.shape == (20,) and PAIR_J.shape == (20,)
+    assert PAIR_I.shape == (30,) and PAIR_J.shape == (30,)   # MAX_JOKERS=6 -> 6*5 ordered pairs
     assert PAIR_I.dtype == jnp.int32 and PAIR_J.dtype == jnp.int32
     assert np.array_equal(np.asarray(PAIR_I), [p[0] for p in _PAIRS])
     assert np.array_equal(np.asarray(PAIR_J), [p[1] for p in _PAIRS])
@@ -97,11 +97,13 @@ def test_shop_offsets_map_correctly():
     verb — pins the play/disc/shop assembly order against actions.py offsets."""
     net, params, obs, _ = _init(B=1)
     floor = np.finfo(np.float32).min
-    # explicit offsets from actions.py
+    # explicit offsets from actions.py (MAX_JOKERS=6: buy2 sell6 reroll1 reorder30 leave1)
     assert (actions._BUY0, actions._SELL0, actions._REROLL, actions._REORDER0, actions._LEAVE) \
-        == (436, 438, 443, 444, 464)
-    for off in [actions._BUY0, actions._BUY0 + 1, actions._SELL0, actions._SELL0 + 4,
-                actions._REROLL, actions._REORDER0, actions._REORDER0 + 19, actions._LEAVE]:
+        == (436, 438, 444, 445, 475)
+    for off in [actions._BUY0, actions._BUY0 + 1, actions._SELL0, actions._SELL0 + 5,
+                actions._REROLL, actions._REORDER0, actions._REORDER0 + 29, actions._LEAVE,
+                actions._USE_TARGET0, actions._OPEN0, actions._PICK0, actions._SKIP_PACK,
+                actions._BUY_VOUCHER]:
         mask = np.zeros((1, NUM_ACTIONS), dtype=bool)
         mask[0, off] = True
         logits, _ = net.apply(params, obs, jnp.asarray(mask))

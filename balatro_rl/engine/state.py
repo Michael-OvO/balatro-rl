@@ -17,10 +17,9 @@ class Phase(IntEnum):
     WON = 1
     LOST = 2
     SHOP = 3
-    # E3: OPEN_PACK is the booster-pack sub-phase (pick K-of-M revealed items). The obs
-    # encoder guards `phase < N_PHASES=4`, so OPEN_PACK gets NO phase one-hot and g[16] is
-    # untouched — the agent stays blind to packs (it's only ever reached via a direct
-    # engine.step, since legal_actions never offers Verb.OPEN until the E5 widening).
+    # OPEN_PACK is the booster-pack sub-phase (pick K-of-M revealed items). Since E5 the obs
+    # encoder gives it its own phase one-hot bit (N_PHASES=5) and legal_actions offers OPEN /
+    # PICK / SKIP_PACK, so the agent sees and drives the pack-opening flow.
     OPEN_PACK = 4
 
 

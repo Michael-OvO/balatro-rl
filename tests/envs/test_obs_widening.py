@@ -63,7 +63,7 @@ def test_plain_game_boss_and_consumables_are_empty():
     o = encode(reset(seed=0))
     assert o["boss_onehot"][int(BossEffect.NONE)] == 1.0 and o["boss_onehot"].sum() == 1.0
     assert o["consum_mask"].sum() == 0.0
-    assert o["global"][16] == 0.0 and o["global"][18] == 0.0          # no consumables, no boss
+    assert o["global"][17] == 0.0 and o["global"][19] == 0.0          # no consumables, no boss
 
 
 # ============================================================================
@@ -90,7 +90,7 @@ def test_boss_onehot_and_card_debuff_flag():
         hand=(C(7, 2), C(7, 1)))                                      # club, heart (0=S,1=H,2=C,3=D)
     o = encode(st)
     assert o["boss_onehot"][int(BossEffect.THE_CLUB)] == 1.0
-    assert o["global"][18] == 1.0                                     # boss-active flag
+    assert o["global"][19] == 1.0                                     # boss-active flag
     assert o["hand"][0][_DEBUFF_I] == 1.0                            # club debuffed
     assert o["hand"][1][_DEBUFF_I] == 0.0                            # heart not
 
@@ -108,7 +108,7 @@ def test_consumable_stream_encodes_owned():
     o = encode(st)
     assert o["consum_types"][0] == consum_vocab_id(planet(PlanetType.MERCURY))
     assert o["consum_mask"][0] == 1.0 and o["consum_mask"][1] == 0.0
-    assert o["global"][16] == 1.0 and o["global"][17] == 2.0          # #consumables, slots
+    assert o["global"][17] == 1.0 and o["global"][18] == 2.0          # #consumables, slots
 
 
 # ============================================================================

@@ -1,12 +1,30 @@
 import numpy as np
 from balatro_rl.engine.engine import Verb, reset, legal_actions, step
 from balatro_rl.engine.state import Phase
-from balatro_rl.envs.actions import NUM_ACTIONS, decode, legal_mask, PLAY_N, SHOP_BASE, _LEAVE
+from balatro_rl.envs.actions import (
+    NUM_ACTIONS, decode, encode_action, legal_mask, PLAY_N, SHOP_BASE, _LEAVE,
+    _USE0, _USE_TARGET0, _OPEN0, _PICK0, _SKIP_PACK, _BUY_VOUCHER,
+)
 
 
 def test_action_space_size():
     assert PLAY_N == 218            # C(8,1..5)
-    assert NUM_ACTIONS == 467       # 218 play + 218 discard + 29 shop + 2 USE
+    # 218 play + 218 discard + 40 shop(buy2 sell6 reroll1 reorder30 leave1) + 2 USE
+    #   + 218 USE_TARGET + 2 OPEN + 5 PICK + 1 SKIP + 1 VOUCHER
+    assert NUM_ACTIONS == 705
+
+
+def test_decode_e5_blocks_roundtrip():
+    assert decode(_USE0 + 1) == (Verb.USE, 1)
+    assert decode(_USE_TARGET0) == (Verb.USE_TARGET, (0,))
+    assert decode(_OPEN0 + 1) == (Verb.OPEN, 1)
+    assert decode(_PICK0 + 4) == (Verb.PICK, 4)
+    assert decode(_SKIP_PACK) == (Verb.SKIP_PACK, 0)
+    assert decode(_BUY_VOUCHER) == (Verb.BUY_VOUCHER, 0)
+    assert _BUY_VOUCHER == NUM_ACTIONS - 1
+    for i in range(NUM_ACTIONS):           # every id roundtrips
+        v, a = decode(i)
+        assert encode_action(v, a) == i
 
 
 def test_decode_play_and_discard():
@@ -19,12 +37,11 @@ def test_decode_play_and_discard():
 def test_decode_shop_actions():
     assert decode(SHOP_BASE) == (Verb.BUY, 0)
     assert decode(SHOP_BASE + 1) == (Verb.BUY, 1)
-    assert decode(SHOP_BASE + 2) == (Verb.SELL, 0)
-    assert decode(SHOP_BASE + 7) == (Verb.REROLL, 0)
+    assert decode(SHOP_BASE + 2) == (Verb.SELL, 0)         # SELL 0..5 (MAX_JOKERS=6)
+    assert decode(SHOP_BASE + 8) == (Verb.REROLL, 0)       # after buy2 + sell6
     assert decode(_LEAVE) == (Verb.LEAVE_SHOP, 0)
     assert decode(_LEAVE + 1) == (Verb.USE, 0)             # USE ids appended after LEAVE_SHOP
-    assert decode(NUM_ACTIONS - 1) == (Verb.USE, 1)
-    v, arg = decode(SHOP_BASE + 8)                          # first reorder
+    v, arg = decode(SHOP_BASE + 9)                          # first reorder
     assert v == Verb.REORDER and isinstance(arg, tuple) and arg[0] != arg[1]
 
 
