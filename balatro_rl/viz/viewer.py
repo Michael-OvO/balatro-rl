@@ -740,6 +740,12 @@ def build_demo():
         jump.change(go_jump, inputs=[jump, cur_idx, traj], outputs=nav_outs)
         slider.release(go_slider, inputs=[slider, traj], outputs=[cur_idx, focus, reel, probs])
 
+        gr.Markdown(
+            "<sub>Card, Joker, boss and consumable artwork is from **Balatro** &copy; 2024 "
+            "**LocalThunk** (published by **Playstack**), sourced from the "
+            "[Balatro Wiki](https://balatrowiki.org). This is a fan-made, non-commercial "
+            "research tool and is **not affiliated with or endorsed by** the rights holders; "
+            "all art rights remain theirs. See `balatro_rl/viz/assets/ATTRIBUTION.md`.</sub>")
         demo.load(None, None, None, js=_KEYS_JS)   # optional keyboard sugar over the buttons
     return demo
 

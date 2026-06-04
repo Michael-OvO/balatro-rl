@@ -36,5 +36,5 @@ tests/golden/_dumps/
 *.swp
 .ipynb_checkpoints/
 
-# Balatro wiki art cache (copyrighted; fetched locally, not redistributed)
-balatro_rl/viz/assets/
+# Balatro wiki art is committed (1.5MB) so the viewer has it out-of-the-box; see
+# balatro_rl/viz/assets/ATTRIBUTION.md for the copyright/fair-use disclaimer.
