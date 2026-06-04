@@ -45,9 +45,11 @@ def _consum_d(con) -> dict:
 
 
 def _consum_name(con) -> str:
-    from ..engine.consumables import ConsumableKind, PlanetType
+    from ..engine.consumables import ConsumableKind, PlanetType, TarotType
     if con.kind == ConsumableKind.PLANET:
         return PlanetType(con.type_id).name.title().replace("_", " ")
+    if con.kind == ConsumableKind.TAROT:
+        return TarotType(con.type_id).name.title().replace("_", " ")
     return f"{ConsumableKind(con.kind).name.title()} {con.type_id}"
 
 
@@ -60,13 +62,16 @@ def _boss_d(state) -> dict:
 
 
 def _offer_name(o) -> str:
-    """Readable name for a shop offer (joker name via JokerType, planet via PlanetType)."""
-    from ..engine.consumables import ConsumableKind, PlanetType
+    """Readable name for a shop offer (joker via JokerType, planet via PlanetType,
+    tarot via TarotType)."""
+    from ..engine.consumables import PlanetType, TarotType
     from ..engine.shop import ShopKind
     if o.kind == ShopKind.JOKER:
         return JokerType(o.type_id).name
     if o.kind == ShopKind.PLANET:
         return PlanetType(o.type_id).name.title().replace("_", " ")
+    if o.kind == ShopKind.TAROT:
+        return TarotType(o.type_id).name.title().replace("_", " ")
     return f"{ShopKind(o.kind).name.title()} {o.type_id}"
 
 

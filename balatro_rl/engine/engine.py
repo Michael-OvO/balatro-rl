@@ -22,7 +22,7 @@ from .bosses import (
     is_finisher, select_boss,
 )
 from .cards import Enhancement, standard_deck
-from .consumables import Consumable, apply_consumable
+from .consumables import Consumable, apply_consumable, consumable_needs_target
 from .economy import blind_reward, interest, MONEY_PER_UNUSED_HAND
 from .hands import evaluate
 from .jokers.base import HandEvents, JokerState, NO_RULES, REGISTRY, aggregate_rules
@@ -136,7 +136,12 @@ def legal_actions(state: GameState) -> list[tuple[Verb, tuple[int, ...]]]:
         return []
     # Consumables can be USEd in any phase (a free action). Empty by default -> no USE
     # actions, so the action space is byte-identical until consumables are acquired.
-    use = [(Verb.USE, i) for i in range(len(state.consumables))]
+    # E2: card-targeting Tarots are WITHHELD here — their USE needs target hand indices,
+    # which the agent can't select until the Phase E5 obs/action widening. They remain
+    # reachable via a direct engine.step((Verb.USE, (ci, *targets))). Planets and no-target
+    # Tarots (Hermit/Temperance/High Priestess/Emperor/Judgement) are offered normally.
+    use = [(Verb.USE, i) for i, c in enumerate(state.consumables)
+           if not consumable_needs_target(c)]
     if state.phase == Phase.SHOP:
         if state.shop_steps >= SHOP_ACTION_CAP:
             return [(Verb.LEAVE_SHOP, 0)]          # bound shop dithering -> force progress
@@ -247,22 +252,42 @@ def _enter_cashout_or_win(state: GameState, info: dict):
     return shop, {**info, "cleared": True, "result": "shop", "earned": money - state.money}
 
 
-def _use_consumable(state: GameState, ci: int) -> tuple[GameState, dict]:
+def _use_consumable(state: GameState, ci: int, targets=()) -> tuple[GameState, dict]:
     """Apply the consumable at index `ci` and remove it. A free action (doesn't end the
-    turn or touch hands/discards) usable in any phase. Planets level a hand type; other
-    kinds arrive in later sub-phases."""
+    turn or touch hands/discards) usable in any phase. Planets level a hand type; Tarots
+    enhance/transform/destroy SELECTED hand cards (`targets` = hand indices), give money,
+    or create more consumables/jokers.
+
+    apply_consumable returns `(overrides, rng)`; we apply the overrides via
+    dataclasses.replace, thread the (possibly advanced) rng back into the successor, and
+    drop the used consumable. The overrides dict may itself set `consumables` (the create-*
+    Tarots), so we splice the used card out FIRST and let the override win if present."""
     assert 0 <= ci < len(state.consumables), "no such consumable"
     con = state.consumables[ci]
-    overrides = apply_consumable(state, con)
     remaining = state.consumables[:ci] + state.consumables[ci + 1:]
-    nxt = dataclasses.replace(state, consumables=remaining, **overrides)
+    # Resolve against a view with the used card already removed, so create-* Tarots that
+    # return a new `consumables` tuple build on the post-removal slots (cap respected).
+    base = dataclasses.replace(state, consumables=remaining)
+    overrides, rng = apply_consumable(base, con, targets=targets, rng=state.rng)
+    nxt = dataclasses.replace(base, rng=rng, **overrides)
     return nxt, {"verb": "use", "kind": con.kind, "type_id": con.type_id}
 
 
 def step(state: GameState, action: tuple[Verb, tuple[int, ...]]) -> tuple[GameState, dict]:
     assert not state.done, "step() called on a terminal state"
     if action[0] == Verb.USE:        # consumables are usable in any phase (free action)
-        return _use_consumable(state, action[1])
+        # USE-with-targets encoding: the payload is either a bare consumable index
+        #   (Verb.USE, ci)                 -> no targets (Planets, no-target Tarots)
+        # or a tuple whose head is the index and tail is the target hand indices
+        #   (Verb.USE, (ci, *target_idx))  -> card-targeting Tarots
+        # The agent only ever emits the bare form (legal_actions withholds targeting
+        # USEs until E5); the (ci, *targets) form is reachable via direct engine.step.
+        payload = action[1]
+        if isinstance(payload, tuple):
+            ci, targets = payload[0], payload[1:]
+        else:
+            ci, targets = payload, ()
+        return _use_consumable(state, ci, targets)
     if state.phase == Phase.SHOP:
         return _shop_step(state, action)
     verb, idx = action

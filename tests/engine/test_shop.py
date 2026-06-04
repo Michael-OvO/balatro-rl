@@ -1,4 +1,6 @@
-from balatro_rl.engine.consumables import PlanetType
+from balatro_rl.engine.consumables import (
+    DEFERRED_TAROTS, IMPLEMENTED_TAROTS, PlanetType, TarotType,
+)
 from balatro_rl.engine.rng import RNG
 from balatro_rl.engine.jokers.base import JokerType, Rarity, REGISTRY
 import balatro_rl.engine.jokers.library  # noqa: F401
@@ -33,14 +35,18 @@ def test_generate_offers_deterministic_and_valid():
     assert len(offers_a) == 2
     for item in offers_a:
         assert isinstance(item, ShopItem)
-        assert item.kind in (ShopKind.JOKER, ShopKind.PLANET)   # E1 scope
+        assert item.kind in (ShopKind.JOKER, ShopKind.TAROT, ShopKind.PLANET)   # E2 scope
         if item.kind == ShopKind.JOKER:
             jt = JokerType(item.type_id)
             assert REGISTRY[jt].rarity != Rarity.LEGENDARY      # never legendary in shop
             assert item.cost == joker_cost(jt)
-        else:
+        elif item.kind == ShopKind.PLANET:
             assert PlanetType(item.type_id) in PlanetType       # valid planet
             assert item.cost == CONSUMABLE_COST                 # wiki: Planet costs $3
+        else:
+            tt = TarotType(item.type_id)                        # valid, implemented tarot
+            assert tt not in DEFERRED_TAROTS
+            assert item.cost == CONSUMABLE_COST                 # wiki: Tarot costs $3
 
 
 def test_generate_offers_advances_rng():
@@ -56,17 +62,23 @@ def test_item_cost_joker_and_planet():
     assert item_cost(planet) == CONSUMABLE_COST == 3
 
 
-def test_kind_weighting_is_roughly_20_to_4():
-    """Wiki composition (balatrowiki.org/w/Shop): Joker 20 / Planet 4 in E1 scope ->
-    ~20/24 jokers, ~4/24 planets over many slots. Allow generous slack on the sample."""
+def test_kind_weighting_is_roughly_20_4_4():
+    """Wiki composition (balatrowiki.org/w/Shop): Joker 20 / Tarot 4 / Planet 4 (E2 scope) ->
+    ~20/28 jokers, ~4/28 tarots, ~4/28 planets over many slots. Generous slack on the sample."""
     rng = RNG.from_seed(123)
     n = 6000
     offers, _ = generate_offers(rng, n)
     jokers = sum(1 for o in offers if o.kind == ShopKind.JOKER)
+    tarots = sum(1 for o in offers if o.kind == ShopKind.TAROT)
     planets = sum(1 for o in offers if o.kind == ShopKind.PLANET)
-    assert jokers + planets == n                       # only the two E1 kinds appear
-    assert all(o.kind in (ShopKind.JOKER, ShopKind.PLANET) for o in offers)
-    # Expected fractions 20/24 ~= 0.833 and 4/24 ~= 0.167; ±0.05 absolute tolerance.
-    assert abs(jokers / n - 20 / 24) < 0.05
-    assert abs(planets / n - 4 / 24) < 0.05
-    assert all(o.cost == CONSUMABLE_COST for o in offers if o.kind == ShopKind.PLANET)
+    assert jokers + tarots + planets == n              # only the three E2 kinds appear
+    assert all(o.kind in (ShopKind.JOKER, ShopKind.TAROT, ShopKind.PLANET) for o in offers)
+    # Expected fractions 20/28 ~= 0.714, 4/28 ~= 0.143 each; ±0.05 absolute tolerance.
+    assert abs(jokers / n - 20 / 28) < 0.05
+    assert abs(tarots / n - 4 / 28) < 0.05
+    assert abs(planets / n - 4 / 28) < 0.05
+    assert all(o.cost == CONSUMABLE_COST for o in offers
+               if o.kind in (ShopKind.TAROT, ShopKind.PLANET))
+    # Tarot offers only ever roll IMPLEMENTED tarots (the two deferred ones never appear).
+    assert all(TarotType(o.type_id) in IMPLEMENTED_TAROTS
+               for o in offers if o.kind == ShopKind.TAROT)

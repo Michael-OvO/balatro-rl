@@ -1,12 +1,14 @@
 """Shop: offer generation, pricing, reroll, sell. Verified values in
 docs/reference/economy-shop.md.
 
-Phase E1 generalizes shop offers beyond jokers: each card slot rolls a KIND by the
+Phase E1 generalized shop offers beyond jokers: each card slot rolls a KIND by the
 wiki composition (balatrowiki.org/w/Shop) then the specific item. The wiki base weights
-are Joker 20 / Tarot 4 / Planet 4 (Spectral only via the Ghost deck). E1 implements
-JOKER + PLANET only (Tarot's effects arrive in Phase E2), so the slot weighting here is
-Joker 20 / Planet 4. Consumables cost $3 (wiki: Tarot/Planet base price). Per-joker prices
-are the deterministic base costs from the registry (edition surcharges deferred).
+are Joker 20 / Tarot 4 / Planet 4 (Spectral only via the Ghost deck). Phase E2 adds TAROT
+to the roll (its effects are now implemented), so the slot weighting is the full wiki base
+Joker 20 / Tarot 4 / Planet 4 (Spectral stays deferred). Consumables cost $3 (wiki: Tarot/
+Planet base price). Per-joker prices are the deterministic base costs from the registry
+(edition surcharges deferred). A TAROT slot rolls a uniform IMPLEMENTED TarotType (the two
+deferred Tarots — The Fool / The Wheel of Fortune — are excluded from the pool).
 
 The agent stays BLIND to consumable offers in E1: legal_actions only offers joker buys and
 the obs encoder zeroes non-joker offer types. Consumable buys are reachable only via direct
@@ -17,7 +19,7 @@ from __future__ import annotations
 import dataclasses
 from enum import IntEnum
 
-from .consumables import ConsumableKind, PlanetType
+from .consumables import ConsumableKind, IMPLEMENTED_TAROTS, PlanetType
 from .jokers import library as _library  # noqa: F401  (ensures REGISTRY is populated)
 from .jokers.base import REGISTRY, JokerState, JokerType, Rarity
 
@@ -25,9 +27,8 @@ CARD_SLOTS = 2
 REROLL_BASE = 5
 CONSUMABLE_COST = 3           # wiki: Tarot/Planet base shop price ($3); Spectral is $4
 
-# Slot KIND weights (balatrowiki.org/w/Shop). E1 scope = JOKER + PLANET only (Tarot
-# effects land in E2, Spectral is Ghost-deck-only and deferred), so we drop Tarot/Spectral
-# from the roll for now. Wiki base: Joker 20 / Tarot 4 / Planet 4.
+# Slot KIND weights (balatrowiki.org/w/Shop). E2 scope = JOKER + TAROT + PLANET (Spectral
+# is Ghost-deck-only and deferred). Wiki base: Joker 20 / Tarot 4 / Planet 4.
 _KIND_WEIGHTS: tuple[tuple[int, int], ...] = ()   # set after ShopKind is defined (below)
 
 
@@ -38,7 +39,7 @@ class ShopKind(IntEnum):
     SPECTRAL = 4
 
 
-_KIND_WEIGHTS = ((ShopKind.JOKER, 20), (ShopKind.PLANET, 4))
+_KIND_WEIGHTS = ((ShopKind.JOKER, 20), (ShopKind.TAROT, 4), (ShopKind.PLANET, 4))
 
 # A bought consumable must be stored with its ConsumableKind (what USE/obs/replay read),
 # NOT the ShopKind — the two enums number their members differently (e.g. ShopKind.PLANET=3
@@ -94,7 +95,7 @@ def _pool(rarity: Rarity) -> list[JokerType]:
 
 
 def _roll_kind(rng):
-    """Roll a slot KIND by weight (Joker 20 / Planet 4), threading rng."""
+    """Roll a slot KIND by weight (Joker 20 / Tarot 4 / Planet 4), threading rng."""
     total = sum(w for _, w in _KIND_WEIGHTS)
     r, rng = rng.randint(0, total - 1)
     acc = 0
@@ -121,15 +122,25 @@ def _roll_planet(rng) -> tuple[ShopItem, object]:
                     cost=CONSUMABLE_COST), rng
 
 
+def _roll_tarot(rng) -> tuple[ShopItem, object]:
+    """A uniform IMPLEMENTED TarotType (the two deferred Tarots are excluded), $3."""
+    idx, rng = rng.randint(0, len(IMPLEMENTED_TAROTS) - 1)
+    return ShopItem(kind=int(ShopKind.TAROT), type_id=int(IMPLEMENTED_TAROTS[idx]),
+                    cost=CONSUMABLE_COST), rng
+
+
 def generate_offers(rng, n: int = CARD_SLOTS):
-    """Generate n typed shop offers. Each slot rolls a KIND (Joker 20 / Planet 4) then the
-    specific item: JOKER -> rarity-weighted registry pick (cost from registry); PLANET ->
-    a uniform PlanetType (cost $3). Returns (tuple[ShopItem], rng)."""
+    """Generate n typed shop offers. Each slot rolls a KIND (Joker 20 / Tarot 4 / Planet 4)
+    then the specific item: JOKER -> rarity-weighted registry pick (cost from registry);
+    PLANET -> a uniform PlanetType ($3); TAROT -> a uniform IMPLEMENTED TarotType ($3).
+    Returns (tuple[ShopItem], rng)."""
     offers = []
     for _ in range(n):
         kind, rng = _roll_kind(rng)
         if kind == ShopKind.PLANET:
             item, rng = _roll_planet(rng)
+        elif kind == ShopKind.TAROT:
+            item, rng = _roll_tarot(rng)
         else:
             item, rng = _roll_joker(rng)
         offers.append(item)
