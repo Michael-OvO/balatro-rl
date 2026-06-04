@@ -1,6 +1,6 @@
 """Fixed flat action space + legal mask over the engine's variable actions.
 
-Layout (NUM_ACTIONS = 705):
+Layout (NUM_ACTIONS = 706):
   [0, 218)        PLAY    subset = _SUBSETS[id]
   [218, 436)      DISCARD subset = _SUBSETS[id - 218]
   SHOP_BASE=436:
@@ -10,16 +10,16 @@ Layout (NUM_ACTIONS = 705):
     +9..+38       REORDER pair _PAIRS[k]  (30 ordered (i,j), i!=j, over MAX_JOKERS)
     +39           LEAVE_SHOP
   USE0=476:
-    +0..+1        USE consumable slot 0..1 (MAX_CONSUM; no-target apply / arm a targeting Tarot)
+    +0..+2        USE consumable slot 0..2 (MAX_CONSUM=3; no-target apply / arm a targeting Tarot)
   --- E5 widening blocks ---
-  USE_TARGET0=478:
-    +0..+217      USE_TARGET subset = _SUBSETS[id - 478] (apply the ARMED targeting Tarot)
-  OPEN0=696:
+  USE_TARGET0=479:
+    +0..+217      USE_TARGET subset = _SUBSETS[id - 479] (apply the ARMED targeting Tarot)
+  OPEN0=697:
     +0..+1        OPEN pack offer slot 0..1 (MAX_PACK)
-  PICK0=698:
+  PICK0=699:
     +0..+4        PICK pack item slot 0..4 (MAX_PACK_ITEMS)
-  SKIP_PACK=703
-  BUY_VOUCHER=704
+  SKIP_PACK=704
+  BUY_VOUCHER=705
 Subsets are enumerated over MAX_HAND=8 slots; subsets referencing absent hand
 slots are simply never legal (the engine never offers them), so they mask out.
 """
@@ -35,7 +35,7 @@ MAX_HAND = 8
 MAX_SELECT = 5
 MAX_JOKERS = 6     # JOKER_SLOTS (5) + the Antimatter voucher's +1; the real-game cap
 MAX_SHOP = 2       # CARD_SLOTS
-MAX_CONSUM = 2     # consumable slots (USE action ids)
+MAX_CONSUM = 3     # consumable slots: base 2 + the Crystal Ball voucher's +1 (USE action ids)
 MAX_PACK = 2       # PACK_SLOTS (booster-pack offer slots)
 MAX_PACK_ITEMS = 5  # most an OPEN_PACK ever reveals (Jumbo/Mega = 5 shown)
 
@@ -49,18 +49,18 @@ _PAIRS: list[tuple[int, int]] = [(i, j) for i in range(MAX_JOKERS) for j in rang
 _PAIR_INDEX: dict[tuple[int, int], int] = {p: k for k, p in enumerate(_PAIRS)}
 
 SHOP_BASE = 2 * PLAY_N                  # 436
-_BUY0 = SHOP_BASE                       # +0..+1
-_SELL0 = SHOP_BASE + MAX_SHOP           # +2..+6
-_REROLL = _SELL0 + MAX_JOKERS           # +7
-_REORDER0 = _REROLL + 1                 # +8..+27
-_LEAVE = _REORDER0 + len(_PAIRS)        # +28
-_USE0 = _LEAVE + 1                       # USE consumable 0..MAX_CONSUM-1 (465..466)
-_USE_TARGET0 = _USE0 + MAX_CONSUM        # USE_TARGET subset 0..217 (467..684)
-_OPEN0 = _USE_TARGET0 + PLAY_N           # OPEN pack 0..1 (685..686)
-_PICK0 = _OPEN0 + MAX_PACK               # PICK item 0..4 (687..691)
-_SKIP_PACK = _PICK0 + MAX_PACK_ITEMS     # 692
-_BUY_VOUCHER = _SKIP_PACK + 1            # 693
-NUM_ACTIONS = _BUY_VOUCHER + 1           # 694
+_BUY0 = SHOP_BASE                       # +0..+1   (436,437)
+_SELL0 = SHOP_BASE + MAX_SHOP           # +2..+7   (438..443; MAX_JOKERS=6)
+_REROLL = _SELL0 + MAX_JOKERS           # +8       (444)
+_REORDER0 = _REROLL + 1                 # +9..+38  (445..474; 30 pairs)
+_LEAVE = _REORDER0 + len(_PAIRS)        # +39      (475)
+_USE0 = _LEAVE + 1                       # USE consumable 0..MAX_CONSUM-1 (476..478)
+_USE_TARGET0 = _USE0 + MAX_CONSUM        # USE_TARGET subset 0..217 (479..696)
+_OPEN0 = _USE_TARGET0 + PLAY_N           # OPEN pack 0..1 (697..698)
+_PICK0 = _OPEN0 + MAX_PACK               # PICK item 0..4 (699..703)
+_SKIP_PACK = _PICK0 + MAX_PACK_ITEMS     # 704
+_BUY_VOUCHER = _SKIP_PACK + 1            # 705
+NUM_ACTIONS = _BUY_VOUCHER + 1           # 706
 
 
 def decode(action_id: int):

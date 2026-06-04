@@ -9,9 +9,9 @@ from balatro_rl.envs.actions import (
 
 def test_action_space_size():
     assert PLAY_N == 218            # C(8,1..5)
-    # 218 play + 218 discard + 40 shop(buy2 sell6 reroll1 reorder30 leave1) + 2 USE
+    # 218 play + 218 discard + 40 shop(buy2 sell6 reroll1 reorder30 leave1) + 3 USE
     #   + 218 USE_TARGET + 2 OPEN + 5 PICK + 1 SKIP + 1 VOUCHER
-    assert NUM_ACTIONS == 705
+    assert NUM_ACTIONS == 706
 
 
 def test_decode_e5_blocks_roundtrip():

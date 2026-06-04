@@ -412,7 +412,8 @@ def step(state: GameState, action: tuple[Verb, tuple[int, ...]]) -> tuple[GameSt
     boss = BossEffect(state.boss)
     debuffed = boss_debuffed_idx(boss, selected, rules) if state.boss else ()
     res = score_play(selected, jokers=state.jokers, held=tuple(held),
-                     joker_slots=JOKER_SLOTS, money=state.money,
+                     joker_slots=JOKER_SLOTS + extra_joker_slots(state.vouchers),
+                     money=state.money,
                      hands_left=state.hands_left, discards_left=state.discards_left,
                      deck_count=len(state.deck),
                      hand_plays_run=state.hand_plays_run,
@@ -520,7 +521,8 @@ def explain_play(state: GameState, idx) -> dict:
     debuffed = boss_debuffed_idx(boss, selected, rules) if state.boss else ()
     trace: list = []
     res = score_play(selected, jokers=state.jokers, held=held,
-                     joker_slots=JOKER_SLOTS, money=state.money,
+                     joker_slots=JOKER_SLOTS + extra_joker_slots(state.vouchers),
+                     money=state.money,
                      hands_left=state.hands_left, discards_left=state.discards_left,
                      deck_count=len(state.deck),
                      hand_plays_run=state.hand_plays_run, hand_plays_round=state.hand_plays_round,
@@ -533,9 +535,10 @@ def explain_play(state: GameState, idx) -> dict:
 
 def _can_take_pack_item(state: GameState, item) -> bool:
     """Whether a revealed pack item can be added (a free slot of the right kind). A JOKER
-    needs a free joker slot; a CONSUMABLE needs a free consumable slot."""
+    needs a free joker slot (voucher-raised by Antimatter, matching the shop BUY check); a
+    CONSUMABLE needs a free consumable slot."""
     if item.kind == PackItemKind.JOKER:
-        return len(state.jokers) < JOKER_SLOTS
+        return len(state.jokers) < JOKER_SLOTS + extra_joker_slots(state.vouchers)
     return len(state.consumables) < state.consumable_slots
 
 

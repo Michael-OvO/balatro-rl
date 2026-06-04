@@ -11,7 +11,7 @@ vector with no link to *which* cards a play selects):
   acquisition heads (E5): pack OPEN / PICK / SKIP, BUY_VOUCHER, and USE_TARGET (the targeting
                           two-step, scored for free off the SAME candidate pool as play/discard)
 
-Contract: `apply(params, obs, mask) -> (logits[B,694], value_logits[B,255])`. All 694 logits
+Contract: `apply(params, obs, mask) -> (logits[B,706], value_logits[B,255])`. All 706 logits
 are computed then `jnp.where(mask, logits, finfo.min)`. Everything is fixed-shape (static gather
 over a constant index, masked pooling, broadcast_to) so the net jits exactly twice in training
 (act@num_envs, update@mb_size). The logit assembly order is load-bearing — it matches
@@ -88,7 +88,7 @@ class ActorCritic(nn.Module):
         psembed = nn.Embed(PACK_SIZE_VOCAB, d)
         vembed = nn.Embed(VOUCHER_VOCAB, d)
 
-        je = embed(obs["joker_types"]) + nn.Dense(d)(obs["joker_counter"][..., None]) + seg[1]  # [B,5,d]
+        je = embed(obs["joker_types"]) + nn.Dense(d)(obs["joker_counter"][..., None]) + seg[1]  # [B,6,d]
         # shop slot = joker embed (if a joker offer) + consumable embed (if a consumable offer) + cost
         se = (embed(obs["shop_types"]) + cembed(obs["shop_consum"])
               + nn.Dense(d)(obs["shop_cost"][..., None]) + seg[2])      # [B,2,d]
@@ -140,16 +140,16 @@ class ActorCritic(nn.Module):
 
         # ---- SHOP head (29): order matches actions.py (buy2, sell5, reroll1, reorder20, leave1) ----
         ctx_b2 = jnp.broadcast_to(ctx[:, None, :], se.shape)        # [B,2,d]
-        ctx_b5 = jnp.broadcast_to(ctx[:, None, :], je.shape)        # [B,5,d]
+        ctx_b6 = jnp.broadcast_to(ctx[:, None, :], je.shape)        # [B,6,d]
         buy = nn.Dense(1)(nn.gelu(nn.Dense(d)(jnp.concatenate([se, ctx_b2], -1))))[..., 0]   # [B,2]
-        sell = nn.Dense(1)(nn.gelu(nn.Dense(d)(jnp.concatenate([je, ctx_b5], -1))))[..., 0]  # [B,5]
+        sell = nn.Dense(1)(nn.gelu(nn.Dense(d)(jnp.concatenate([je, ctx_b6], -1))))[..., 0]  # [B,6]
         reroll = nn.Dense(1)(nn.gelu(nn.Dense(d)(ctx)))                                       # [B,1]
-        ji = je[:, PAIR_I, :]                                       # [B,20,d]
-        jj = je[:, PAIR_J, :]                                       # [B,20,d]
-        ctx_b20 = jnp.broadcast_to(ctx[:, None, :], ji.shape)      # [B,20,d]
-        reorder = nn.Dense(1)(nn.gelu(nn.Dense(d)(jnp.concatenate([ji, jj, ctx_b20], -1))))[..., 0]  # [B,20]
+        ji = je[:, PAIR_I, :]                                       # [B,30,d]
+        jj = je[:, PAIR_J, :]                                       # [B,30,d]
+        ctx_b30 = jnp.broadcast_to(ctx[:, None, :], ji.shape)      # [B,30,d]
+        reorder = nn.Dense(1)(nn.gelu(nn.Dense(d)(jnp.concatenate([ji, jj, ctx_b30], -1))))[..., 0]  # [B,30]
         leave = nn.Dense(1)(nn.gelu(nn.Dense(d)(ctx)))                                        # [B,1]
-        shop_logits = jnp.concatenate([buy, sell, reroll, reorder, leave], axis=-1)          # [B,29]
+        shop_logits = jnp.concatenate([buy, sell, reroll, reorder, leave], axis=-1)          # [B,40]
 
         # ---- USE head (MAX_CONSUM): score each owned-consumable slot from its embed + ctx ----
         ctx_bc = jnp.broadcast_to(ctx[:, None, :], ce.shape)        # [B,MAX_CONSUM,d]
