@@ -19,7 +19,7 @@ from .bosses import (
     BossEffect, boss_allows_play, boss_debuffed_idx, boss_discards_left,
     boss_draw_target, boss_filters_plays, boss_halves_base, boss_hand_size_delta,
     boss_hands_left, boss_hook_discard, boss_ox_zeroes_money, boss_tooth_cost,
-    select_boss,
+    is_finisher, select_boss,
 )
 from .cards import Enhancement, standard_deck
 from .consumables import apply_consumable
@@ -209,7 +209,7 @@ def _advance_blind(state: GameState):
 
 def _cash_out(state: GameState):
     """Apply blind reward + interest + leftover-hand money + joker on_round_end."""
-    delta = (blind_reward(state.blind_index)
+    delta = (blind_reward(state.blind_index, is_finisher(BossEffect(state.boss)))
              + interest(state.money)
              + state.hands_left * MONEY_PER_UNUSED_HAND)
     # Gold ENHANCEMENT: +$3 for each Gold card still HELD in hand at round end
