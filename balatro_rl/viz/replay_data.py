@@ -113,9 +113,11 @@ def _b(obs: dict):
 
 
 def record_agent_episode(net, params, seed: int, reward_name: str = "shaped",
-                         topk: int = 6, greedy: bool = True) -> list[dict]:
+                         topk: int = 6, greedy: bool = True, enable_bosses: bool = False,
+                         enhance_rate: float = 0.0, grant_planets: int = 0) -> list[dict]:
     apply = jax.jit(net.apply)
-    env = BalatroEnv(reward_name)
+    env = BalatroEnv(reward_name, enable_bosses=enable_bosses,
+                     enhance_rate=enhance_rate, grant_planets=grant_planets)
     obs, mask = env.reset(int(seed))
     key = jax.random.PRNGKey(int(seed))
     steps: list[dict] = []
