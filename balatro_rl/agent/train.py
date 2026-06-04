@@ -84,13 +84,16 @@ def _ramp_scale(cur_scale: float, clear_rate: float, window_full: bool, cfg) -> 
     return cur_scale
 
 
-def train(cfg: TrainConfig, logger=None) -> TrainResult:
+def train(cfg: TrainConfig, logger=None, init_params=None) -> TrainResult:
     if logger is None:
         logger = NullLogger()
     key = jax.random.PRNGKey(cfg.seed)
     net = ActorCritic(action_dim=NUM_ACTIONS, d_model=cfg.d_model)
     key, init_key = jax.random.split(key)
-    params = net.init(init_key, _to_jax(dummy_obs(1)), jnp.ones((1, NUM_ACTIONS), bool))
+    # Warm start from a prior checkpoint (continue training) when init_params is given;
+    # else fresh init. The provided params must match this net's shape (d_model/action dim).
+    params = (init_params if init_params is not None
+              else net.init(init_key, _to_jax(dummy_obs(1)), jnp.ones((1, NUM_ACTIONS), bool)))
     tx = optax.chain(optax.clip_by_global_norm(0.5), optax.adam(cfg.lr, eps=1e-5))
     ts = TrainState.create(apply_fn=net.apply, params=params, tx=tx)
 
@@ -160,15 +163,21 @@ def train(cfg: TrainConfig, logger=None) -> TrainResult:
                       "[mb,218,5,d] candidate gather may OOM — raise num_minibatches.", stacklevel=2)
     losses, mean_returns = [], []
     eval_history = []
-    clears_w = collections.deque(maxlen=cfg.ramp_window)
-    dones_w = collections.deque(maxlen=cfg.ramp_window)
+    # Curriculum ramp signal: fraction of EPISODES that clear >=1 blind (a probability in
+    # [0,1], gated against ramp_clear_rate) -- not blinds-per-episode (which exceeds 1 and
+    # made the 0.7 gate meaningless). ep_cleared persists across updates (episodes span
+    # rollouts). The windows SLIDE (maxlen) and are NOT reset on a bump (bug fix), so the
+    # ramp tracks a moving average instead of waiting a full fresh window after each +scale.
+    ep_cleared = np.zeros(cfg.num_envs, bool)
+    cleared_w = collections.deque(maxlen=cfg.ramp_window)
+    episodes_w = collections.deque(maxlen=cfg.ramp_window)
 
     for _ in range(cfg.num_updates):
         ec = _ent_coef_at(cfg.ent_coef, len(losses))   # 0-based index of THIS update
         if _open_loop:
             cur_scale = float(cfg.req_scale_schedule(len(losses)))
             venv.set_req_scale(cur_scale)
-        update_clears = update_dones = 0
+        update_cleared = update_episodes = 0   # episodes that cleared >=1 blind / total episodes
         update_max_ante, update_max_hand_score, update_max_round = 1, 0, 0
         buf = {
             "obs": {k: np.zeros((T, N) + v.shape[1:], v.dtype) for k, v in next_obs.items()},
@@ -191,16 +200,20 @@ def train(cfg: TrainConfig, logger=None) -> TrainResult:
             next_obs, rewards, dones, infos, next_mask = venv.step(a)
             buf["rewards"][t] = rewards
             buf["dones"][t] = dones.astype(np.float32)
-            update_dones += int(dones.sum())
-            for info in infos:   # aggregate clears + depth/score reached this rollout
+            for i, info in enumerate(infos):   # aggregate clears + depth/score reached this rollout
                 if info.get("cleared"):
-                    update_clears += 1
+                    ep_cleared[i] = True       # this env cleared a blind at some point this episode
                 if info.get("ante", 1) > update_max_ante:
                     update_max_ante = info["ante"]
                 if (info.get("score") or 0) > update_max_hand_score:
                     update_max_hand_score = info["score"]
                 if info.get("round_score", 0) > update_max_round:
                     update_max_round = info["round_score"]
+            for i in range(N):                 # on episode end, bank cleared? then reset the flag
+                if dones[i]:
+                    update_episodes += 1
+                    update_cleared += int(ep_cleared[i])
+                    ep_cleared[i] = False
 
         _, _, last_value, key = act(ts.params, _to_jax(next_obs), jnp.asarray(next_mask), key)
         batch = {
@@ -217,9 +230,9 @@ def train(cfg: TrainConfig, logger=None) -> TrainResult:
         losses.append((total, pg, vl, ent))
         mean_returns.append(float(buf["rewards"].mean()))
         update_idx = len(losses) - 1
-        clears_w.append(update_clears)
-        dones_w.append(update_dones)
-        clear_rate = sum(clears_w) / max(1, sum(dones_w))   # avg blinds cleared per episode
+        cleared_w.append(update_cleared)
+        episodes_w.append(update_episodes)
+        clear_rate = sum(cleared_w) / max(1, sum(episodes_w))   # frac of episodes clearing >=1 blind
         logger.log({"loss/total": total, "loss/policy": pg, "loss/value": vl,
                     "loss/entropy": ent, "train/mean_reward": mean_returns[-1],
                     "train/ent_coef": ec, "train/req_scale": cur_scale,
@@ -227,14 +240,15 @@ def train(cfg: TrainConfig, logger=None) -> TrainResult:
                     "train/max_hand_score": update_max_hand_score,
                     "train/max_round_score": update_max_round}, step=update_idx)
         if not _open_loop:
-            new_scale = _ramp_scale(cur_scale, clear_rate, len(clears_w) == cfg.ramp_window, cfg)
+            new_scale = _ramp_scale(cur_scale, clear_rate, len(episodes_w) == cfg.ramp_window, cfg)
             if new_scale != cur_scale:
                 cur_scale = new_scale
-                venv.set_req_scale(cur_scale)
-                clears_w.clear()
-                dones_w.clear()
+                venv.set_req_scale(cur_scale)   # windows SLIDE (no reset) -> moving-average ramp
         if cfg.eval_interval and (update_idx % cfg.eval_interval == 0):
-            metrics = evaluate(net, ts.params, cfg.eval_seeds, cfg.reward_name)
+            # Eval on the DEPLOY target: the real game (full req_scale, bosses as trained,
+            # plain deck -> exposure OFF), not the training distribution it never deploys to.
+            metrics = evaluate(net, ts.params, cfg.eval_seeds, cfg.reward_name,
+                               enable_bosses=cfg.enable_bosses, req_scale=1.0)
             eval_history.append(metrics)
             logger.log(metrics, step=update_idx)
 
