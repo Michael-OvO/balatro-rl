@@ -6,18 +6,25 @@ from __future__ import annotations
 
 import numpy as np
 
+import dataclasses
+
 from ..engine import engine
 from .actions import decode, legal_mask
+from .exposure import make_exposure
 from .obs import encode
 from .rewards import make_reward
 
 
 class BalatroEnv:
     def __init__(self, reward_name: str = "shaped", req_scale: float = 1.0,
-                 enable_bosses: bool = False):
+                 enable_bosses: bool = False, enhance_rate: float = 0.0,
+                 grant_planets: int = 0):
         self._reward = make_reward(reward_name)
         self._req_scale = req_scale
         self._enable_bosses = enable_bosses   # boss blinds on the boss slot (Phase D retrain)
+        # Acquisition exposure for the retrain (default off -> byte-identical plain game).
+        self._enhance_rate = enhance_rate     # prob each deck card starts enhanced
+        self._grant_planets = grant_planets   # # of Planet consumables to start with
         self.state = None
 
     def set_req_scale(self, scale: float):
@@ -25,7 +32,11 @@ class BalatroEnv:
         self._req_scale = scale
 
     def reset(self, seed: int = 0):
-        self.state = engine.reset(seed, self._req_scale, enable_bosses=self._enable_bosses)
+        card_mods, consumables = make_exposure(seed, self._enhance_rate, self._grant_planets)
+        self.state = engine.reset(seed, self._req_scale, card_mods=card_mods,
+                                  enable_bosses=self._enable_bosses)
+        if consumables:
+            self.state = dataclasses.replace(self.state, consumables=consumables)
         self._reward.reset()
         return encode(self.state), legal_mask(self.state)
 

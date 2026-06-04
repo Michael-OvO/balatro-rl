@@ -16,10 +16,12 @@ def _stack(obs_list: list[dict]) -> dict:
 
 class SyncVectorEnv:
     def __init__(self, num_envs: int, reward_name: str = "shaped", base_seed: int = 0,
-                 req_scale: float = 1.0, enable_bosses: bool = False):
+                 req_scale: float = 1.0, enable_bosses: bool = False,
+                 enhance_rate: float = 0.0, grant_planets: int = 0):
         self.num_envs = num_envs
         self.base_seed = base_seed
-        self._envs = [BalatroEnv(reward_name, req_scale, enable_bosses) for _ in range(num_envs)]
+        self._envs = [BalatroEnv(reward_name, req_scale, enable_bosses, enhance_rate, grant_planets)
+                      for _ in range(num_envs)]
         self._next_seed = base_seed
         self._obs = None
         self._mask = None
