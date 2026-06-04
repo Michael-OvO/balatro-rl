@@ -28,11 +28,14 @@ from .hands import evaluate
 from .jokers.base import HandEvents, JokerState, NO_RULES, REGISTRY, aggregate_rules
 from .rng import RNG
 from .scoring import score_play
+from .packs import PackItemKind, open_pack, roll_pack
 from .shop import (
     CARD_SLOTS, SHOP_TO_CONSUMABLE_KIND, ShopKind, generate_offers,
     reroll_cost, sell_value,
 )
 from .state import GameState, Phase
+
+PACK_SLOTS = 2                # number of booster-pack offers generated per shop visit
 
 STARTING_MONEY = 4
 HANDS_PER_BLIND = 4
@@ -53,6 +56,10 @@ class Verb(IntEnum):
     REORDER = 5
     LEAVE_SHOP = 6
     USE = 7        # use a consumable (payload = consumable index); a free action, any phase
+    # E3 booster packs (agent BLIND — never emitted by legal_actions; direct engine.step only):
+    OPEN = 8       # in SHOP: buy + open pack_offers[i] -> enter OPEN_PACK
+    PICK = 9       # in OPEN_PACK: take pack_open[i] (consumable/joker slot) -> decrement picks
+    SKIP_PACK = 10  # in OPEN_PACK: end picking -> back to SHOP
 
 
 def _draw(hand: list, deck: list, hand_size: int) -> tuple[list, list]:
@@ -142,6 +149,16 @@ def legal_actions(state: GameState) -> list[tuple[Verb, tuple[int, ...]]]:
     # Tarots (Hermit/Temperance/High Priestess/Emperor/Judgement) are offered normally.
     use = [(Verb.USE, i) for i, c in enumerate(state.consumables)
            if not consumable_needs_target(c)]
+    if state.phase == Phase.OPEN_PACK:
+        # E3: pick K-of-M revealed items. Only items that CAN be added are pickable (a free
+        # joker/consumable slot); SKIP_PACK always ends picking. This phase is only ever
+        # reached via a direct engine.step((OPEN, ...)) — the agent is blind to packs until E5.
+        actions = list(use)
+        for i, item in enumerate(state.pack_open):
+            if _can_take_pack_item(state, item):
+                actions.append((Verb.PICK, i))
+        actions.append((Verb.SKIP_PACK, 0))
+        return actions
     if state.phase == Phase.SHOP:
         if state.shop_steps >= SHOP_ACTION_CAP:
             return [(Verb.LEAVE_SHOP, 0)]          # bound shop dithering -> force progress
@@ -214,7 +231,8 @@ def _advance_blind(state: GameState):
         discards_left=boss_discards_left(boss, DISCARDS_PER_BLIND), rng=rng,
         hand_plays_round=tuple([0] * 12),  # per-round counter resets each blind
         boss=int(boss),
-        jokers=jokers, phase=Phase.PLAYING, shop_offers=(), rerolls_done=0, shop_steps=0)
+        jokers=jokers, phase=Phase.PLAYING, shop_offers=(), rerolls_done=0, shop_steps=0,
+        pack_offers=(), pack_open=(), pack_picks=0)
     return nxt, {"verb": "leave_shop", "result": "next_blind",
                  "ante": new_ante, "blind": new_blind}
 
@@ -239,6 +257,16 @@ def _cash_out(state: GameState):
     return money, tuple(kept), rng
 
 
+def _generate_pack_offers(rng, n: int = PACK_SLOTS):
+    """Roll n booster-pack offers (E3), mirroring generate_offers for the card slots.
+    Returns (tuple[Pack, ...], rng)."""
+    packs = []
+    for _ in range(n):
+        pack, rng = roll_pack(rng)
+        packs.append(pack)
+    return tuple(packs), rng
+
+
 def _enter_cashout_or_win(state: GameState, info: dict):
     # Win immediately if the Ante-8 Boss was just cleared (no shop).
     if state.ante >= 8 and state.blind_index == 2:
@@ -246,9 +274,11 @@ def _enter_cashout_or_win(state: GameState, info: dict):
         return won, {**info, "cleared": True, "result": "won"}
     money, jokers, rng = _cash_out(state)
     offers, rng = generate_offers(rng, CARD_SLOTS)
+    pack_offers, rng = _generate_pack_offers(rng, PACK_SLOTS)
     shop = dataclasses.replace(state, money=money, jokers=jokers, rng=rng,
                                phase=Phase.SHOP, shop_offers=offers, rerolls_done=0,
-                               shop_steps=0)
+                               shop_steps=0, pack_offers=pack_offers,
+                               pack_open=(), pack_picks=0)
     return shop, {**info, "cleared": True, "result": "shop", "earned": money - state.money}
 
 
@@ -288,6 +318,8 @@ def step(state: GameState, action: tuple[Verb, tuple[int, ...]]) -> tuple[GameSt
         else:
             ci, targets = payload, ()
         return _use_consumable(state, ci, targets)
+    if state.phase == Phase.OPEN_PACK:        # E3: pick K-of-M revealed pack items
+        return _open_pack_step(state, action)
     if state.phase == Phase.SHOP:
         return _shop_step(state, action)
     verb, idx = action
@@ -448,10 +480,62 @@ def explain_play(state: GameState, idx) -> dict:
             "mult": float(res.mult), "hand_type": int(res.hand_type)}
 
 
+def _can_take_pack_item(state: GameState, item) -> bool:
+    """Whether a revealed pack item can be added (a free slot of the right kind). A JOKER
+    needs a free joker slot; a CONSUMABLE needs a free consumable slot."""
+    if item.kind == PackItemKind.JOKER:
+        return len(state.jokers) < JOKER_SLOTS
+    return len(state.consumables) < state.consumable_slots
+
+
+def _open_pack_step(state: GameState, action):
+    """E3 OPEN_PACK sub-phase: PICK item i (add to the run, decrement picks) or SKIP_PACK
+    (end picking). Returns to SHOP once picks are exhausted or on SKIP."""
+    verb = action[0]
+    if verb == Verb.SKIP_PACK:
+        nxt = dataclasses.replace(state, phase=Phase.SHOP, pack_open=(), pack_picks=0)
+        return nxt, {"verb": "skip_pack"}
+    if verb == Verb.PICK:
+        i = action[1]
+        assert 0 <= i < len(state.pack_open), "no such pack item"
+        item = state.pack_open[i]
+        assert _can_take_pack_item(state, item), "no slot for this pack item"
+        common = dict(pack_open=tuple(o for k, o in enumerate(state.pack_open) if k != i))
+        if item.kind == PackItemKind.JOKER:
+            taken = dict(jokers=state.jokers + (item.payload,))
+            info = {"verb": "pick", "kind": int(PackItemKind.JOKER),
+                    "type_id": int(item.payload.type)}
+        else:
+            taken = dict(consumables=state.consumables + (item.payload,))
+            info = {"verb": "pick", "kind": int(PackItemKind.CONSUMABLE),
+                    "type_id": int(item.payload.type_id)}
+        picks = state.pack_picks - 1
+        if picks <= 0:        # picks exhausted -> resume the shop
+            nxt = dataclasses.replace(state, phase=Phase.SHOP, pack_open=(),
+                                      pack_picks=0, **taken)
+        else:
+            nxt = dataclasses.replace(state, pack_picks=picks, **common, **taken)
+        return nxt, info
+    raise ValueError(f"illegal open-pack action: {verb}")
+
+
 def _shop_step(state: GameState, action):
     verb = action[0]
     if verb == Verb.LEAVE_SHOP:
         return _advance_blind(state)
+    if verb == Verb.OPEN:        # E3: buy + open a booster pack -> enter OPEN_PACK
+        i = action[1]
+        assert 0 <= i < len(state.pack_offers), "no such pack offer"
+        pack = state.pack_offers[i]
+        assert state.money >= pack.cost, "cannot afford pack"
+        items, picks, rng = open_pack(pack, state.rng)
+        offers = tuple(p for k, p in enumerate(state.pack_offers) if k != i)
+        nxt = dataclasses.replace(state, money=state.money - pack.cost,
+                                  pack_offers=offers, phase=Phase.OPEN_PACK,
+                                  pack_open=items, pack_picks=picks, rng=rng,
+                                  shop_steps=state.shop_steps + 1)
+        return nxt, {"verb": "open", "kind": int(pack.kind), "size": int(pack.size),
+                     "cost": pack.cost, "shown": len(items), "picks": picks}
     if verb == Verb.BUY:
         i = action[1]
         assert 0 <= i < len(state.shop_offers), "no such shop offer"
