@@ -9,6 +9,7 @@ import numpy as np
 import dataclasses
 
 from ..engine import engine
+from ..engine.state import Phase
 from .actions import decode, legal_mask
 from .exposure import make_exposure
 from .obs import encode
@@ -46,6 +47,14 @@ class BalatroEnv:
         prev = self.state
         verb, arg = decode(action_id)
         nxt, info = engine.step(prev, (verb, arg))
+        # A boss blind can leave NO legal move (e.g. Mouth/Eye when you can't form the
+        # required hand type and discards are spent). That's a stuck position = a lost
+        # blind; mark it terminal so the policy never faces an all-masked state (which the
+        # categorical sampler would resolve to a random ILLEGAL action). Off a boss blind
+        # the hand always refills, so this never triggers in the plain game.
+        if not nxt.done and not legal_mask(nxt).any():
+            nxt = dataclasses.replace(nxt, done=True, won=False, phase=Phase.LOST)
+            info = {**info, "result": "lost", "stuck": True}
         self.state = nxt
         reward = float(self._reward(prev, action_id, nxt, info))
         done = bool(nxt.done)
