@@ -28,18 +28,23 @@ from ..viz.replay_data import record_agent_episode, save_episode
 
 OUT = os.environ.get("BALATRO_EPISODE_DIR", "/tmp/sweep_out")
 D_MODEL = 128
-ENHANCE_RATE = 0.2
-GRANT_PLANETS = 1
+# Exposure OFF: the enhanced-card "crutch" made the first retrain rely on mods it doesn't
+# have at deploy (3 blinds with exposure -> 0.5 without). The agent must learn the real,
+# plain-deck game. The curriculum (now fixed to actually reach scale 1.0) provides the
+# bootstrap instead.
+ENHANCE_RATE = 0.0
+GRANT_PLANETS = 0
+NUM_UPDATES = 1000
 
 
 def _ent(u: int) -> float:
     """Entropy coefficient: decay 0.04 -> 0.01 over the run."""
-    return max(0.01, 0.04 * (1.0 - u / 700.0))
+    return max(0.01, 0.04 * (1.0 - u / (NUM_UPDATES * 0.7)))
 
 
 def build_config() -> TrainConfig:
     return TrainConfig(
-        num_updates=800, num_envs=32, num_steps=64, d_model=D_MODEL,
+        num_updates=NUM_UPDATES, num_envs=32, num_steps=64, d_model=D_MODEL,
         num_minibatches=4, update_epochs=4, lr=3e-4,
         reward_name="shaped", seed=0, ent_coef=_ent,
         curr_floor=0.2, ramp_clear_rate=0.7, ramp_step=0.05, ramp_window=20,
