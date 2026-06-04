@@ -78,3 +78,12 @@ class GameState:
     pack_offers: tuple = ()      # tuple[Pack, ...] offered in the shop
     pack_open: tuple = ()        # tuple[PackItem, ...] revealed during OPEN_PACK
     pack_picks: int = 0          # remaining picks during OPEN_PACK
+    # E4 vouchers. `vouchers` is the owned set (a tuple of VoucherType ids) and the SINGLE
+    # SOURCE OF TRUTH for every persistent per-run modifier (extra hands/discards/slots,
+    # interest cap, reroll discount, shop weights) — those are DERIVED from it where used,
+    # never stored separately. `voucher_offer` is the shop's single voucher slot (0 = none
+    # offered; otherwise a VoucherType id). Both default empty/0 -> byte-identical for
+    # directly-constructed states; the agent is blind (legal_actions never offers
+    # Verb.BUY_VOUCHER) until the E5 obs/action widening.
+    vouchers: tuple = ()         # tuple[int, ...] owned VoucherType ids
+    voucher_offer: int = 0       # the shop's voucher slot (0 = none; else a VoucherType id)

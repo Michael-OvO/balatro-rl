@@ -72,8 +72,10 @@ def item_cost(item: ShopItem) -> int:
     return CONSUMABLE_COST
 
 
-def reroll_cost(rerolls_done: int, base: int = REROLL_BASE) -> int:
-    return max(0, base + rerolls_done)
+def reroll_cost(rerolls_done: int, base: int = REROLL_BASE, discount: int = 0) -> int:
+    """Cost of the next reroll: base + rerolls used, minus any voucher discount (Reroll
+    Surplus/Glut), floored at $0. `discount` defaults to 0 -> byte-identical pre-voucher."""
+    return max(0, base + rerolls_done - discount)
 
 
 def sell_value(jtype: JokerType, sell_bonus: int = 0) -> int:
@@ -94,16 +96,25 @@ def _pool(rarity: Rarity) -> list[JokerType]:
     return [t for t in REGISTRY if REGISTRY[t].rarity == rarity and rarity != Rarity.LEGENDARY]
 
 
-def _roll_kind(rng):
-    """Roll a slot KIND by weight (Joker 20 / Tarot 4 / Planet 4), threading rng."""
-    total = sum(w for _, w in _KIND_WEIGHTS)
+def kind_weights(tarot_mult: int = 1, planet_mult: int = 1) -> tuple[tuple[int, int], ...]:
+    """The slot KIND weights, with the Tarot/Planet base weights scaled by the voucher
+    multipliers (Tarot/Planet Merchant 2x, Tycoon 4x). Both default 1 -> the wiki base
+    Joker 20 / Tarot 4 / Planet 4 (byte-identical pre-voucher)."""
+    mult = {int(ShopKind.TAROT): tarot_mult, int(ShopKind.PLANET): planet_mult}
+    return tuple((kind, w * mult.get(int(kind), 1)) for kind, w in _KIND_WEIGHTS)
+
+
+def _roll_kind(rng, weights=_KIND_WEIGHTS):
+    """Roll a slot KIND by weight (default Joker 20 / Tarot 4 / Planet 4), threading rng.
+    `weights` may be a voucher-scaled table from kind_weights()."""
+    total = sum(w for _, w in weights)
     r, rng = rng.randint(0, total - 1)
     acc = 0
-    for kind, w in _KIND_WEIGHTS:
+    for kind, w in weights:
         acc += w
         if r < acc:
             return kind, rng
-    return _KIND_WEIGHTS[-1][0], rng   # unreachable; defensive
+    return weights[-1][0], rng   # unreachable; defensive
 
 
 def _roll_joker(rng) -> tuple[ShopItem, object]:
@@ -129,14 +140,17 @@ def _roll_tarot(rng) -> tuple[ShopItem, object]:
                     cost=CONSUMABLE_COST), rng
 
 
-def generate_offers(rng, n: int = CARD_SLOTS):
-    """Generate n typed shop offers. Each slot rolls a KIND (Joker 20 / Tarot 4 / Planet 4)
-    then the specific item: JOKER -> rarity-weighted registry pick (cost from registry);
-    PLANET -> a uniform PlanetType ($3); TAROT -> a uniform IMPLEMENTED TarotType ($3).
+def generate_offers(rng, n: int = CARD_SLOTS, tarot_mult: int = 1, planet_mult: int = 1):
+    """Generate n typed shop offers. Each slot rolls a KIND (base Joker 20 / Tarot 4 /
+    Planet 4, with the Tarot/Planet weights scaled by the voucher multipliers — Tarot/Planet
+    Merchant 2x, Tycoon 4x) then the specific item: JOKER -> rarity-weighted registry pick
+    (cost from registry); PLANET -> a uniform PlanetType ($3); TAROT -> a uniform IMPLEMENTED
+    TarotType ($3). `n` (the card-slot count) and the mults default to the pre-voucher values.
     Returns (tuple[ShopItem], rng)."""
+    weights = kind_weights(tarot_mult, planet_mult)
     offers = []
     for _ in range(n):
-        kind, rng = _roll_kind(rng)
+        kind, rng = _roll_kind(rng, weights)
         if kind == ShopKind.PLANET:
             item, rng = _roll_planet(rng)
         elif kind == ShopKind.TAROT:
