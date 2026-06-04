@@ -241,3 +241,58 @@ def consumable_desc(kind: int, type_id: int) -> str:
     if kind_i == int(ConsumableKind.SPECTRAL):
         return "Spectral card"
     return ""
+
+
+# Voucher effect text (summaries of the E4 wiki-verified effects in engine/vouchers.py), keyed
+# by VoucherType name so it survives id renumbering. Used by the replay viewer.
+_VOUCHER_DESC: dict[str, str] = {
+    "OVERSTOCK": "+1 card slot in the shop (3 -> 4 offers).",
+    "OVERSTOCK_PLUS": "+1 more card slot in the shop (4 -> 5 offers).",
+    "CRYSTAL_BALL": "+1 consumable slot.",
+    "GRABBER": "+1 hand per round.",
+    "NACHO_TONG": "+1 more hand per round.",
+    "WASTEFUL": "+1 discard per round.",
+    "RECYCLOMANCY": "+1 more discard per round.",
+    "PAINT_BRUSH": "+1 hand size.",
+    "PALETTE": "+1 more hand size.",
+    "ANTIMATTER": "+1 joker slot.",
+    "SEED_MONEY": "Raise the interest cap to $10 (1 extra interest tier).",
+    "MONEY_TREE": "Raise the interest cap to $20 (2 extra interest tiers).",
+    "REROLL_SURPLUS": "Shop rerolls cost $2 less.",
+    "REROLL_GLUT": "Shop rerolls cost $2 less again.",
+    "TAROT_MERCHANT": "Tarot cards appear more often in the shop.",
+    "TAROT_TYCOON": "Tarot cards appear much more often in the shop.",
+    "PLANET_MERCHANT": "Planet cards appear more often in the shop.",
+    "PLANET_TYCOON": "Planet cards appear much more often in the shop.",
+    "BLANK": "Does nothing (unlocks the next voucher tier).",
+}
+
+_PACK_DESC: dict[str, str] = {
+    "ARCANA": "Arcana Pack — choose Tarot card(s) from those shown.",
+    "CELESTIAL": "Celestial Pack — choose Planet card(s) from those shown.",
+    "BUFFOON": "Buffoon Pack — choose Joker(s) from those shown.",
+    "STANDARD": "Standard Pack — choose playing card(s) from those shown.",
+    "SPECTRAL": "Spectral Pack — choose Spectral card(s) from those shown.",
+}
+
+_PACK_SIZE_NAME: dict[int, str] = {1: "", 2: "Jumbo ", 3: "Mega "}
+
+
+def voucher_desc(vtype) -> str:
+    """Effect text for a VoucherType (by name; "" if unknown)."""
+    from .vouchers import VoucherType
+    try:
+        return _VOUCHER_DESC.get(VoucherType(int(vtype)).name, "")
+    except (TypeError, ValueError):
+        return ""
+
+
+def pack_desc(kind, size=None) -> str:
+    """Effect text for a booster pack (kind + optional size prefix)."""
+    from .packs import PackKind
+    try:
+        base = _PACK_DESC.get(PackKind(int(kind)).name, "Booster pack")
+    except (TypeError, ValueError):
+        return ""
+    prefix = _PACK_SIZE_NAME.get(int(size), "") if size is not None else ""
+    return prefix + base

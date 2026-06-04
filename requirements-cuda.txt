@@ -1,0 +1,10 @@
+# GPU (CUDA 12) deps for the E5 retrain on a CUDA host (RunPod etc).
+# Usage on the GPU box:
+#     pip install -r requirements-cuda.txt && pip install -e .
+# jax[cuda12] pulls a CUDA-enabled jaxlib + the cuda12 plugin (bundled CUDA libs — no system
+# CUDA toolkit needed, just an NVIDIA driver). Pinned to the 0.10.x line the engine is tested on.
+jax[cuda12]>=0.10,<0.11
+flax>=0.12,<0.13
+optax>=0.2
+numpy>=1.26
+trackio>=0.2

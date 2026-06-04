@@ -14,7 +14,7 @@ from ..agent.value_head import value_decode
 from ..engine import engine
 from ..engine.bosses import BossEffect
 from ..engine.cards import card_str
-from ..engine.descriptions import boss_desc, consumable_desc, joker_desc
+from ..engine.descriptions import boss_desc, consumable_desc, joker_desc, pack_desc, voucher_desc
 from ..engine.engine import Verb, explain_play
 from ..engine.jokers.base import JokerType
 from ..engine.shop import sell_value
@@ -22,7 +22,7 @@ from ..engine.state import GameState, Phase
 from ..envs.actions import decode
 from ..envs.balatro_env import BalatroEnv
 
-_PHASE = {0: "PLAYING", 1: "WON", 2: "LOST", 3: "SHOP"}
+_PHASE = {0: "PLAYING", 1: "WON", 2: "LOST", 3: "SHOP", 4: "OPEN_PACK"}
 _MAX_STEPS = 3000
 
 
@@ -78,6 +78,44 @@ def _offer_name(o) -> str:
 def _offer_d(o) -> dict:
     return {"kind": int(o.kind), "type_id": int(o.type_id),
             "name": _offer_name(o), "cost": int(o.cost)}
+
+
+def _pack_offer_d(p) -> dict:
+    """A shop booster-pack offer (kind/size/cost + readable name & effect)."""
+    from ..engine.packs import PackKind, PackSize
+    name = (PackSize(p.size).name.title() + " " if int(p.size) > 1 else "") + \
+        PackKind(p.kind).name.title() + " Pack"
+    return {"kind": int(p.kind), "size": int(p.size), "cost": int(p.cost),
+            "name": name, "desc": pack_desc(p.kind, p.size)}
+
+
+def _pack_item_d(it) -> dict:
+    """A revealed pack item during OPEN_PACK (a Joker or a consumable)."""
+    from ..engine.packs import PackItemKind
+    if it.kind == PackItemKind.JOKER:
+        return {"kind": int(it.kind), "type_id": int(it.payload.type),
+                "name": JokerType(it.payload.type).name, "desc": joker_desc(it.payload.type)}
+    con = it.payload
+    return {"kind": int(it.kind), "type_id": int(con.type_id),
+            "name": _consum_name(con), "desc": consumable_desc(con.kind, con.type_id)}
+
+
+def _voucher_name(vid) -> str:
+    from ..engine.vouchers import VoucherType
+    return VoucherType(int(vid)).name.title().replace("_", " ")
+
+
+def _voucher_d(vid) -> dict:
+    return {"type_id": int(vid), "name": _voucher_name(vid), "desc": voucher_desc(vid)}
+
+
+def _pending_d(state) -> dict:
+    """The armed targeting Tarot awaiting target cards (empty when nothing is armed)."""
+    if state.pending_consumable < 0:
+        return {}
+    con = state.consumables[state.pending_consumable]
+    return {"slot": int(state.pending_consumable), "name": _consum_name(con),
+            "desc": consumable_desc(con.kind, con.type_id)}
 
 
 def action_label(action_id: int) -> str:
@@ -187,6 +225,17 @@ def record_agent_episode(net, params, seed: int, reward_name: str = "shaped",
             "boss": _boss_d(state),
             "consumables": [_consum_d(c) for c in state.consumables],
             "score_trace": score_trace,
+            # --- E5 acquisition content (so future runs are recorded with ALL the detail) ---
+            "pack_offers": ([_pack_offer_d(p) for p in state.pack_offers]
+                            if int(state.phase) == int(Phase.SHOP) else []),
+            "pack_open": ([_pack_item_d(it) for it in state.pack_open]
+                          if int(state.phase) == int(Phase.OPEN_PACK) else []),
+            "pack_picks": int(state.pack_picks),
+            "voucher_offer": (_voucher_d(state.voucher_offer)
+                              if (int(state.phase) == int(Phase.SHOP) and state.voucher_offer)
+                              else None),
+            "vouchers": [_voucher_d(v) for v in state.vouchers],
+            "pending": _pending_d(state),
         })
     if env.state.done:        # explicit terminal frame so the viewer ENDS on the outcome
         st = env.state        # (otherwise the last frame is the pre-action state, e.g. "hands 1")
@@ -204,6 +253,9 @@ def record_agent_episode(net, params, seed: int, reward_name: str = "shaped",
             "hand_reset": False, "earned": None,
             "boss": _boss_d(st), "consumables": [_consum_d(c) for c in st.consumables],
             "score_trace": [],
+            "pack_offers": [], "pack_open": [], "pack_picks": 0,
+            "voucher_offer": None, "vouchers": [_voucher_d(v) for v in st.vouchers],
+            "pending": _pending_d(st),
         })
     return steps
 
