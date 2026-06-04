@@ -1,6 +1,6 @@
 import dataclasses
 from balatro_rl.engine.cards import Card
-from balatro_rl.engine.consumables import ConsumableKind, PlanetType
+from balatro_rl.engine.consumables import ConsumableKind, PlanetType, planet
 from balatro_rl.engine.engine import Verb, reset, legal_actions, step
 from balatro_rl.engine.state import Phase
 from balatro_rl.engine.jokers.base import JokerType, JokerState
@@ -71,8 +71,8 @@ def test_shop_buy_planet_adds_consumable():
     assert s4.levels[int(HandType.PAIR)] == before + 1 and s4.consumables == ()
 
 
-def test_legal_actions_never_offers_consumable_buy():
-    """E1: the policy is blind to consumable offers — only JOKER offers get a BUY action."""
+def test_legal_actions_offers_consumable_buy():
+    """E5: the policy now sees consumable offers — BUY is offered for both kinds (slot permitting)."""
     s = _clearable(money=100, hands_left=1)
     s2, _ = step(s, (Verb.PLAY, (0, 1, 2, 3)))
     s2 = _force_offers(s2, [
@@ -80,7 +80,10 @@ def test_legal_actions_never_offers_consumable_buy():
         ShopItem(int(ShopKind.JOKER), int(JokerType.BLUEPRINT), 10),
     ])
     buys = {a[1] for a in legal_actions(s2) if a[0] == Verb.BUY}
-    assert buys == {1}        # only the JOKER offer (slot 1) is buyable; the Planet (slot 0) isn't
+    assert buys == {0, 1}     # both the Planet (slot 0) and the JOKER (slot 1) are buyable
+    # ...but a full consumable inventory withholds the Planet buy (the joker stays buyable).
+    full = dataclasses.replace(s2, consumables=(planet(PlanetType.PLUTO), planet(PlanetType.MARS)))
+    assert {a[1] for a in legal_actions(full) if a[0] == Verb.BUY} == {1}
 
 
 def test_shop_sell_returns_money_and_frees_slot():

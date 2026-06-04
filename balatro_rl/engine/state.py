@@ -87,3 +87,10 @@ class GameState:
     # Verb.BUY_VOUCHER) until the E5 obs/action widening.
     vouchers: tuple = ()         # tuple[int, ...] owned VoucherType ids
     voucher_offer: int = 0       # the shop's voucher slot (0 = none; else a VoucherType id)
+    # E5 targeting two-step. A card-targeting Tarot's USE needs hand indices the flat action
+    # space can't pre-enumerate, so the agent USEs it in two steps: `(USE, ci)` arms it (sets
+    # pending_consumable = ci, applies nothing), then `(USE_TARGET, subset)` applies it to those
+    # hand cards and clears pending. -1 = nothing armed (the default, byte-identical: legal_actions
+    # only arms targeting Tarots, which need consumables the default game never has). Only ever
+    # armed in PLAYING with a non-empty hand, so a valid target always exists.
+    pending_consumable: int = -1

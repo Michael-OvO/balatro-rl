@@ -255,10 +255,17 @@ def test_reroll_discount_floors_at_zero():
 
 # ---- agent blindness ---------------------------------------------------------
 
-def test_legal_actions_never_offers_buy_voucher():
-    s = _shop(money=100, hands_left=1)
-    s = dataclasses.replace(s, voucher_offer=int(VoucherType.GRABBER))
-    assert all(a[0] != Verb.BUY_VOUCHER for a in legal_actions(s))
+def test_legal_actions_offers_buy_voucher_when_eligible():
+    # E5: the policy now sees the voucher slot — BUY_VOUCHER is legal when affordable + prereq met.
+    s = dataclasses.replace(_shop(money=100, hands_left=1), voucher_offer=int(VoucherType.GRABBER))
+    assert (Verb.BUY_VOUCHER, 0) in legal_actions(s)
+    # ...withheld when the prereq isn't met (Nacho Tong needs Grabber owned)...
+    locked = dataclasses.replace(_shop(money=100, hands_left=1),
+                                 voucher_offer=int(VoucherType.NACHO_TONG))
+    assert all(a[0] != Verb.BUY_VOUCHER for a in legal_actions(locked))
+    # ...and withheld when unaffordable (vouchers cost $10; set money AFTER cash-out).
+    poor = dataclasses.replace(_shop(hands_left=1), money=5, voucher_offer=int(VoucherType.GRABBER))
+    assert all(a[0] != Verb.BUY_VOUCHER for a in legal_actions(poor))
 
 
 def test_reset_honors_no_vouchers():

@@ -21,6 +21,7 @@ from balatro_rl.engine.consumables import (
     planet, tarot,
 )
 from balatro_rl.engine.engine import JOKER_SLOTS, legal_actions, reset, step, Verb
+from balatro_rl.engine.state import Phase
 from balatro_rl.engine.jokers.base import JokerState, JokerType
 from balatro_rl.engine.rng import RNG
 
@@ -367,29 +368,52 @@ def test_legal_actions_offers_no_target_tarot_use():
     assert (Verb.USE, 0) in legal_actions(st)
 
 
-def test_legal_actions_withholds_card_targeting_tarot_use():
+def test_legal_actions_arms_card_targeting_tarot_in_playing():
+    # E5: in PLAYING (hand present) a card-targeting Tarot is offered as (USE, ci) to ARM the
+    # two-step. Stepping it sets pending_consumable and applies nothing.
     st = dataclasses.replace(reset(seed=0), consumables=(tarot(TarotType.THE_CHARIOT),))
-    assert not any(v == Verb.USE for v, _p in legal_actions(st))
+    assert (Verb.USE, 0) in legal_actions(st)
+    armed, _ = step(st, (Verb.USE, 0))
+    assert armed.pending_consumable == 0 and armed.consumables == st.consumables  # not yet used
 
 
-def test_legal_actions_mixed_consumables_only_offers_non_targeting():
-    # idx0 Chariot (targeting, withheld), idx1 Hermit (offered), idx2 Star (withheld),
-    # idx3 Planet (offered).
+def test_legal_actions_playing_offers_all_consumable_uses():
+    # E5: in PLAYING every owned consumable is USE-able (targeting Tarots arm; the rest apply).
     cons = (tarot(TarotType.THE_CHARIOT), tarot(TarotType.THE_HERMIT),
             tarot(TarotType.THE_STAR), planet(PlanetType.MERCURY))
     st = dataclasses.replace(reset(seed=0), consumables=cons)
     uses = {a[1] for a in legal_actions(st) if a[0] == Verb.USE}
+    assert uses == {0, 1, 2, 3}
+
+
+def test_legal_actions_shop_withholds_card_targeting_tarot_use():
+    # Targeting Tarots can only be armed in PLAYING (they target hand cards). In the SHOP only
+    # the non-targeting consumables (Hermit idx1, Planet idx3) are USE-able.
+    cons = (tarot(TarotType.THE_CHARIOT), tarot(TarotType.THE_HERMIT),
+            tarot(TarotType.THE_STAR), planet(PlanetType.MERCURY))
+    st = dataclasses.replace(reset(seed=0), phase=Phase.SHOP, consumables=cons)
+    uses = {a[1] for a in legal_actions(st) if a[0] == Verb.USE}
     assert uses == {1, 3}
 
 
-def test_card_targeting_tarot_reachable_via_direct_step():
-    """Even though legal_actions withholds it, the engine still resolves a direct
-    USE-with-targets step (E5 will widen the action space)."""
+def test_card_targeting_tarot_via_direct_step():
+    """The direct USE-with-targets tuple step still resolves immediately (scripted path)."""
     st = _state_with_hand([C(2, 0), C(3, 1)],
                           consumables=(tarot(TarotType.THE_SUN),))
-    assert not any(v == Verb.USE for v, _p in legal_actions(st))   # blind
-    nxt, _ = step(st, (Verb.USE, (0, 0, 1)))                       # but reachable directly
+    nxt, _ = step(st, (Verb.USE, (0, 0, 1)))                       # direct (ci, *targets) form
     assert all(c.suit == 1 for c in nxt.hand)                      # Hearts
+
+
+def test_card_targeting_tarot_via_armed_two_step():
+    """E5 agent path: arm with (USE, ci), then apply with (USE_TARGET, subset)."""
+    st = _state_with_hand([C(2, 0), C(3, 1)],
+                          consumables=(tarot(TarotType.THE_SUN),))
+    armed, _ = step(st, (Verb.USE, 0))                            # arm
+    assert armed.pending_consumable == 0
+    assert all(a[0] == Verb.USE_TARGET for a in legal_actions(armed))   # only targeting now
+    nxt, _ = step(armed, (Verb.USE_TARGET, (0, 1)))              # apply to both cards
+    assert all(c.suit == 1 for c in nxt.hand) and nxt.pending_consumable == -1
+    assert nxt.consumables == ()                                  # consumed
 
 
 # ============================================================================
