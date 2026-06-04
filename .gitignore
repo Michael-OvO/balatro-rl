@@ -35,3 +35,6 @@ tests/golden/_dumps/
 .vscode/
 *.swp
 .ipynb_checkpoints/
+
+# Balatro wiki art cache (copyrighted; fetched locally, not redistributed)
+balatro_rl/viz/assets/

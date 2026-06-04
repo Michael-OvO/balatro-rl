@@ -21,6 +21,7 @@ import os
 from collections import Counter
 
 from balatro_rl.engine.cards import Edition, Enhancement, Seal
+from . import assets   # optional wiki art cache (data-URI images); falls back to CSS tiles
 
 # The picker lists episodes from here (where the sweep writes <run>.episode.json).
 EPISODE_DIR = os.environ.get("BALATRO_EPISODE_DIR", "/tmp/sweep_out")
@@ -111,6 +112,15 @@ _STYLE = """<style>
 .ribbon{position:absolute;top:-7px;left:50%;transform:translateX(-50%);font-size:8px;
   font-weight:800;letter-spacing:.04em;color:#fff;padding:1px 5px;border-radius:5px}
 .rb-play{background:#4d9bff}.rb-disc{background:#6b7280}.rb-new{background:#46cc78}
+/* --- wiki art overlays (present only when the local asset cache is populated) --- */
+.card-art{position:absolute;inset:0;width:100%;height:100%;object-fit:cover;
+  border-radius:inherit;image-rendering:pixelated;z-index:0}
+.card .r,.card .big,.card .br{position:relative;z-index:1}
+.card:has(.card-art) .r,.card:has(.card-art) .big,.card:has(.card-art) .br{visibility:hidden}
+.ribbon,.badges{z-index:2}
+.jk-art,.con-art{display:block;width:72px;height:auto;margin:0 auto 2px;border-radius:6px;
+  image-rendering:pixelated;align-self:center}
+.boss-ico-img{width:30px;height:30px;image-rendering:pixelated;flex:none;border-radius:4px}
 /* --- jokers --- */
 .jokers{display:flex;gap:8px;flex-wrap:wrap}
 .jk{display:flex;flex-direction:column;gap:3px;max-width:208px;
@@ -243,7 +253,11 @@ def card_html(card: dict, *, state: str = "held", small: bool = False) -> str:
            "new": '<span class="ribbon rb-new">NEW</span>'}.get(state, "")
     cstyle = "background:#f4f1e9 !important" + (";width:40px;height:56px" if small else "")
     tcol = f"color:{hexc} !important"
-    return (f'<div class="card{cls}" style="{cstyle}">{rib}'
+    # Real card face from the wiki art cache (overlays the CSS glyphs, which stay in the DOM
+    # as a fallback); badges + ribbon sit on top. None when the cache is absent -> CSS tile.
+    art = assets.card(card["rank"], card["suit"])
+    art_html = f'<img class="card-art" src="{art}" alt="">' if art else ""
+    return (f'<div class="card{cls}" style="{cstyle}">{art_html}{rib}'
             f'<div class="r {col}" style="{tcol}">{r}</div>'
             f'<div class="big {col}" style="{tcol}">{g}</div>'
             f'<div class="br {col}" style="{tcol}">{r}{g}</div>'
@@ -345,7 +359,9 @@ def _jokers_html(cur, prev):
         cls = " add" if cur_names[j["name"]] > prev_names[j["name"]] else ""
         desc = j.get("desc", "")
         desc_html = f'<span class="jk-desc">{html.escape(desc)}</span>' if desc else ""
-        chips.append(f'<span class="jk{cls}"><span class="jk-name">{html.escape(j["name"])}'
+        art = assets.joker(j.get("type")) if j.get("type") is not None else None
+        art_html = f'<img class="jk-art" src="{art}" alt="">' if art else ""
+        chips.append(f'<span class="jk{cls}">{art_html}<span class="jk-name">{html.escape(j["name"])}'
                      f'{c}</span>{desc_html}</span>')
     for name in (prev_names - cur_names).elements():   # sold / lost since prev step
         chips.append(f'<span class="jk rem"><span class="jk-name">{html.escape(name)}</span></span>')
@@ -364,7 +380,10 @@ def _boss_banner(s):
     name = html.escape(boss.get("name", "Boss Blind"))
     desc = html.escape(boss.get("desc", ""))
     sep = " &mdash; " if desc else ""
-    return ('<div class="boss"><span class="boss-ico">&#128121;</span>'
+    bimg = assets.boss(boss.get("id")) if boss.get("id") else None
+    ico = (f'<img class="boss-ico-img" src="{bimg}" alt="">' if bimg
+           else '<span class="boss-ico">&#128121;</span>')
+    return (f'<div class="boss">{ico}'
             f'<span><span class="boss-name">{name}</span>'
             f'{sep}<span class="boss-desc">{desc}</span></span></div>')
 
@@ -379,7 +398,9 @@ def _consumables_html(s):
     for c in cons:
         desc = c.get("desc", "")
         desc_html = f'<span class="con-desc">{html.escape(desc)}</span>' if desc else ""
-        chips.append(f'<span class="con"><span class="con-name">{html.escape(c.get("name", "?"))}'
+        art = assets.consumable(c.get("kind", 0), c.get("type_id", 0))
+        art_html = f'<img class="con-art" src="{art}" alt="">' if art else ""
+        chips.append(f'<span class="con">{art_html}<span class="con-name">{html.escape(c.get("name", "?"))}'
                      f'</span>{desc_html}</span>')
     return ('<div class="bv-card"><div class="bv-sec">Consumables</div>'
             '<div class="consums">' + "".join(chips) + "</div></div>")
