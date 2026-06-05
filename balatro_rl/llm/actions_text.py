@@ -93,8 +93,8 @@ def render_menu(menu: Menu) -> str:
     if menu.can_target:
         card_verbs.append("target")
     if card_verbs:
-        verbs = " / ".join(card_verbs)
-        lines.append(f'To {verbs} cards, reply with JSON: '
+        verbs = " / ".join(f"{v} cards" for v in card_verbs)
+        lines.append(f'To {verbs}, reply with JSON: '
                      f'{{"action": "{card_verbs[0]}", "cards": [hand indices]}}')
     return "\n".join(lines)
 
