@@ -79,8 +79,8 @@ def test_ramp_scale_logic():
     from balatro_rl.agent.train import _ramp_scale
     cfg = TrainConfig(curr_floor=0.2, ramp_clear_rate=0.7, ramp_step=0.05)
     assert _ramp_scale(0.2, 0.5, True, cfg) == 0.2              # below threshold -> hold
-    assert _ramp_scale(0.2, 0.9, False, cfg) == 0.2            # window not full -> hold
-    assert abs(_ramp_scale(0.2, 0.9, True, cfg) - 0.25) < 1e-9  # raise by ramp_step
+    assert _ramp_scale(0.2, 0.9, False, cfg) == 0.2            # can't bump (window/cooldown) -> hold
+    assert abs(_ramp_scale(0.2, 0.9, True, cfg) - 0.25) < 1e-9  # bump allowed -> raise by ramp_step
     assert _ramp_scale(0.98, 0.9, True, cfg) == 1.0           # clamp at the real game
     assert _ramp_scale(1.0, 0.9, True, cfg) == 1.0            # already 1.0 -> stays
 

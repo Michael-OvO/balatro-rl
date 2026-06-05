@@ -160,11 +160,10 @@ def _b(obs: dict):
 
 
 def record_agent_episode(net, params, seed: int, reward_name: str = "shaped",
-                         topk: int = 6, greedy: bool = True, enable_bosses: bool = False,
-                         enhance_rate: float = 0.0, grant_planets: int = 0) -> list[dict]:
+                         topk: int = 6, greedy: bool = True,
+                         enable_bosses: bool = False) -> list[dict]:
     apply = jax.jit(net.apply)
-    env = BalatroEnv(reward_name, enable_bosses=enable_bosses,
-                     enhance_rate=enhance_rate, grant_planets=grant_planets)
+    env = BalatroEnv(reward_name, enable_bosses=enable_bosses)
     obs, mask = env.reset(int(seed))
     key = jax.random.PRNGKey(int(seed))
     steps: list[dict] = []
@@ -213,7 +212,7 @@ def record_agent_episode(net, params, seed: int, reward_name: str = "shaped",
                             if int(state.phase) == int(Phase.SHOP) else []),
             "hand_reset": bool(verb == Verb.LEAVE_SHOP),
             "earned": info.get("earned"),
-            # --- Phase D content for the enriched viewer ---
+            # --- boss / consumables / score-trace ---
             "boss": _boss_d(state),
             "consumables": [_consum_d(c) for c in state.consumables],
             "score_trace": score_trace,

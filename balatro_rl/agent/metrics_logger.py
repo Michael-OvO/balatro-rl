@@ -103,13 +103,29 @@ class ConsoleLogger:
 
 
 class TrackioLogger:
-    """Logs to a local-first Trackio run (see docs/reference/observability.md).
-    View later with: `trackio show --project <project>`."""
+    """Logs to a Trackio run (see docs/reference/observability.md).
 
-    def __init__(self, project: str, name=None, config=None):
+    Two viewing modes:
+    - LOCAL (default): writes a local SQLite db; view with `trackio show --project <project>`
+      (or SSH-forward the dashboard port). Fine on a laptop, awkward on a remote GPU box.
+    - HOSTED: pass `space_id="user/repo"` and Trackio deploys/syncs a live dashboard to a
+      HuggingFace Space — a persistent url you open from any browser, even after the pod dies.
+      This is the remote-training answer (needs an HF token on the box). `private=True` for a
+      private Space. `auto_log_gpu=True` adds GPU util/memory traces (so you can see whether the
+      GPU is saturated or the CPU env-stepping is the limiter)."""
+
+    def __init__(self, project: str, name=None, config=None, space_id=None,
+                 private=False, auto_log_gpu=False, gpu_log_interval=10.0):
         import trackio
         self._trackio = trackio
-        trackio.init(project=project, name=name, config=config)
+        kw = dict(project=project, name=name, config=config)
+        if space_id:                      # hosted dashboard on a HF Space (shareable url)
+            kw.update(space_id=space_id, private=private)
+        # Forward auto_log_gpu UNCONDITIONALLY: omitting it lets trackio's default self-detect an
+        # Apple-Silicon GPU and log metrics on a Mac when we explicitly meant "off" (callers only
+        # pass auto_log_gpu=True on a real GPU box).
+        kw.update(auto_log_gpu=bool(auto_log_gpu), gpu_log_interval=gpu_log_interval)
+        trackio.init(**kw)
 
     def log(self, metrics: dict, step=None):
         self._trackio.log(metrics, step=step)

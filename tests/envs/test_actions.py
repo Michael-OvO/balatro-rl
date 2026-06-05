@@ -66,12 +66,13 @@ def test_decode_play_and_discard():
 
 def test_decode_shop_actions():
     assert decode(SHOP_BASE) == (Verb.BUY, 0)
+    assert decode(SHOP_BASE + 1) == (Verb.BUY, 1)
     assert decode(SHOP_BASE + 3) == (Verb.BUY, 3)          # BUY 0..3 (MAX_SHOP=4)
     assert decode(SHOP_BASE + 4) == (Verb.SELL, 0)         # SELL 0..5 (MAX_JOKERS=6) starts after BUY
     assert decode(SHOP_BASE + 10) == (Verb.REROLL, 0)      # after buy4 + sell6
     assert decode(_LEAVE) == (Verb.LEAVE_SHOP, 0)
     assert decode(_LEAVE + 1) == (Verb.USE, 0)             # USE ids appended after LEAVE_SHOP
-    v, arg = decode(SHOP_BASE + 11)                         # first reorder (after buy4 + sell6 + reroll1)
+    v, arg = decode(SHOP_BASE + 11)                         # first reorder (after buy4 sell6 reroll1)
     assert v == Verb.REORDER and isinstance(arg, tuple) and arg[0] != arg[1]
 
 

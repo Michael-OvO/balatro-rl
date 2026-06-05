@@ -144,19 +144,19 @@ def legal_mask(state) -> np.ndarray:
         # their caps likewise have no flat id.
         if verb in (Verb.PLAY, Verb.DISCARD, Verb.USE_TARGET) and any(i >= MAX_HAND for i in arg):
             continue
-        # A shop offer slot beyond MAX_SHOP has no flat id; skip it (it masks out) rather than
-        # let encode_action alias it onto the SELL block. Can't happen at the real-game cap
-        # (CARD_SLOTS + Overstock + Overstock Plus = 4 = MAX_SHOP) but degrades gracefully.
-        if verb == Verb.BUY and arg >= MAX_SHOP:
-            continue
         if verb == Verb.USE and arg >= MAX_CONSUM:
             continue
         if verb == Verb.OPEN and arg >= MAX_PACK:
             continue
         if verb == Verb.PICK and arg >= MAX_PACK_ITEMS:
             continue
-        # Defensive: a joker slot beyond MAX_JOKERS has no flat id (can't happen at the current
-        # caps, but degrades gracefully if a future voucher raises the engine cap past it).
+        # Defensive: a shop/joker slot beyond its MAX_* has no flat id. CRITICAL for BUY — a
+        # BUY id past MAX_SHOP would otherwise alias into the SELL block (silent buy->sell
+        # corruption). Can't happen at the current caps (MAX_SHOP=4 covers Overstock+Plus,
+        # MAX_JOKERS=6 covers Antimatter), but degrades gracefully if a future voucher raises
+        # the engine cap past them.
+        if verb == Verb.BUY and arg >= MAX_SHOP:
+            continue
         if verb == Verb.SELL and arg >= MAX_JOKERS:
             continue
         if verb == Verb.REORDER and any(i >= MAX_JOKERS for i in arg):
