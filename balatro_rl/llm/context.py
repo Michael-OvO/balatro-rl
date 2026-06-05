@@ -31,4 +31,5 @@ class ConversationContext:
         obs = getattr(self, "_pending_obs", observation)
         self._turns.append((obs, assistant_reply))
         if len(self._turns) > self._window:
-            self._dropped = len(self._turns) - self._window
+            self._dropped += len(self._turns) - self._window   # accumulate, don't overwrite
+            self._turns = self._turns[-self._window:]           # prune to the window

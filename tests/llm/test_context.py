@@ -30,3 +30,15 @@ def test_dropped_turns_are_summarized_not_silently_lost():
     msgs = ctx.render("OBS-3")
     blob = "\n".join(m["content"] for m in msgs)
     assert "earlier turns" in blob.lower()
+
+
+def test_turns_list_stays_bounded_over_a_long_game():
+    ctx = ConversationContext(system_prompt="RULES", window_turns=3)
+    for t in range(50):
+        ctx.render(f"OBS-{t}")
+        ctx.update(assistant_reply=f"REPLY-{t}", observation="")
+    msgs = ctx.render("OBS-50")
+    assert len(ctx._turns) <= 3                       # memory bounded, not 50
+    assert len(msgs) <= 1 + 2 * 3 + 1                 # message count bounded
+    blob = "\n".join(m["content"] for m in msgs)
+    assert "REPLY-49" in blob and "REPLY-0" not in blob
