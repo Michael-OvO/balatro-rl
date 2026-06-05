@@ -56,6 +56,13 @@ class TrainConfig:
     # fade in as the score target ramps (the plateau came from full-strength bosses under a still-
     # low target). No-op unless enable_bosses; eval always uses the full deploy target (boss_rate=1).
     boss_curriculum: bool = True
+    # Early stopping: stop once the eval metric stops improving — catches the plateau/overfit where
+    # more updates no longer help (and may regress). Counts CONSECUTIVE evals without a > min_delta
+    # improvement over the best-so-far; stops at `patience`. 0 = off (train the full num_updates).
+    # Only meaningful with eval_interval > 0. Best-checkpoint tracking is the caller's job (on_update).
+    early_stop_patience: int = 0
+    early_stop_metric: str = "eval/mean_blinds_cleared"
+    early_stop_min_delta: float = 0.0
 
 
 @dataclasses.dataclass
@@ -189,6 +196,8 @@ def train(cfg: TrainConfig, logger=None, init_params=None, on_update=None) -> Tr
     cleared_w = collections.deque(maxlen=cfg.ramp_window)
     episodes_w = collections.deque(maxlen=cfg.ramp_window)
     updates_since_bump = cfg.ramp_window
+    best_eval = float("-inf")        # early stop: best eval metric + consecutive non-improving evals
+    evals_no_improve = 0
 
     for _ in range(cfg.num_updates):
         ec = _ent_coef_at(cfg.ent_coef, len(losses))   # 0-based index of THIS update
@@ -277,8 +286,21 @@ def train(cfg: TrainConfig, logger=None, init_params=None, on_update=None) -> Tr
                                enable_bosses=cfg.enable_bosses, req_scale=1.0)
             eval_history.append(metrics)
             logger.log(metrics, step=update_idx)
+            # Early-stop accounting: track the best eval metric; count a plateau ONLY once the
+            # curriculum has reached full difficulty (cur_scale >= 1.0) — during the ramp the
+            # deploy-target eval is legitimately still climbing, so counting then would stop early.
+            if cfg.early_stop_patience and cfg.early_stop_metric in metrics:
+                cur = float(metrics[cfg.early_stop_metric])
+                if cur > best_eval + cfg.early_stop_min_delta:
+                    best_eval, evals_no_improve = cur, 0
+                elif cur_scale >= 1.0:
+                    evals_no_improve += 1
         if on_update is not None:        # periodic checkpoint hook (entrypoint decides cadence)
             on_update(update_idx, ts.params)
+        if cfg.early_stop_patience and evals_no_improve >= cfg.early_stop_patience:
+            logger.log({"train/early_stopped_at": float(update_idx),
+                        "train/best_eval": best_eval}, step=update_idx)
+            break
 
     logger.finish()
     return TrainResult(params=ts.params, losses=losses, mean_returns=mean_returns,

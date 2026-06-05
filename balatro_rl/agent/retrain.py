@@ -14,6 +14,8 @@ smoke (see docs/RUNPOD.md):
     BALATRO_CHECKPOINT_EVERY save params every N updates (default 50; 0 = off) — so a multi-hour
                             run survives a late crash. Latest -> <OUT>/retrain_e5_ckpt.msgpack.
     BALATRO_RESUME          path to a .msgpack to WARM-START from (resume a crashed run)
+    BALATRO_EARLY_STOP      stop after N evals (at full difficulty) with no improvement (default 8;
+                            0 = off) — ends a long run when more updates stop helping (overfit/plateau)
 
 The bottleneck is the CPU env-stepping (Python), not the GPU — a 4.7M-param backward finishes in
 ms on any modern GPU, so the GPU tier barely matters and throughput scales with num_envs + vCPUs.
@@ -46,6 +48,9 @@ NUM_UPDATES = int(os.environ.get("BALATRO_UPDATES", 5 if SMOKE else 2000))
 NUM_MB = 2 if SMOKE else 8
 CHECKPOINT_EVERY = int(os.environ.get("BALATRO_CHECKPOINT_EVERY", 2 if SMOKE else 50))
 RESUME = os.environ.get("BALATRO_RESUME")    # path to a .msgpack to warm-start from (resume)
+# Early stop: # of consecutive evals (at full difficulty) with no eval-metric improvement before
+# stopping. Catches the overfit/plateau so a long run ends when more updates stop helping. 0 = off.
+EARLY_STOP = int(os.environ.get("BALATRO_EARLY_STOP", 0 if SMOKE else 8))
 
 
 def _ent(u: int) -> float:
@@ -61,6 +66,7 @@ def build_config() -> TrainConfig:
         curr_floor=0.2, ramp_clear_rate=0.7, ramp_step=0.05, ramp_window=20,
         enable_bosses=True, boss_curriculum=True,          # E5: bosses fade in with the score bar
         eval_interval=(2 if SMOKE else 50), eval_seeds=(0, 1, 2, 3),
+        early_stop_patience=EARLY_STOP, early_stop_metric="eval/mean_blinds_cleared",
     )
 
 
