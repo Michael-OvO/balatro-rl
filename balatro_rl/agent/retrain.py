@@ -45,7 +45,9 @@ OUT = os.environ.get("BALATRO_EPISODE_DIR", "/tmp/sweep_out")
 D_MODEL = int(os.environ.get("BALATRO_DMODEL", 64 if SMOKE else 256))
 NUM_ENVS = int(os.environ.get("BALATRO_NUM_ENVS", 8 if SMOKE else 64))
 NUM_UPDATES = int(os.environ.get("BALATRO_UPDATES", 5 if SMOKE else 2000))
-NUM_MB = 2 if SMOKE else 8
+# Minibatch COUNT. Raise it alongside NUM_ENVS so the minibatch SIZE (num_envs*num_steps / NUM_MB)
+# stays ~constant on a high-core box; num_envs*num_steps must divide evenly by it.
+NUM_MB = int(os.environ.get("BALATRO_NUM_MB", 2 if SMOKE else 8))
 CHECKPOINT_EVERY = int(os.environ.get("BALATRO_CHECKPOINT_EVERY", 2 if SMOKE else 50))
 RESUME = os.environ.get("BALATRO_RESUME")    # path to a .msgpack to warm-start from (resume)
 # Early stop: # of consecutive evals (at full difficulty) with no eval-metric improvement before
