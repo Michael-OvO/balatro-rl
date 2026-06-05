@@ -6,7 +6,8 @@
 data:
   train_files: ~/data/balatro/train.parquet      # placeholder; env drives the task (see runbook)
   val_files:   ~/data/balatro/val.parquet
-  train_batch_size: 16                            # parallel env episodes per step
+  train_batch_size: 16                            # task-groups per step (x rollout.n rollouts each)
+  val_batch_size: 8                               # validation task-groups (group_n collapses to 1)
   max_prompt_length: 4096
   max_response_length: 512                        # brief reasoning + the JSON action
   return_raw_chat: True                           # required for multi-turn agent tasks

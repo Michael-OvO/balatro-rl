@@ -12,33 +12,28 @@ box**. Treat the first launch as a smoke test, not a trusted run. Design: `docs/
 ```bash
 # this repo (engine + the LLM boundary the env adapter imports)
 cd ~/balatro-e6 && pip install -e '.[llm]'
-# verl-agent (multi-turn agentic RL on top of verl)
+# verl-agent (multi-turn agentic RL on top of verl). The [vllm] extra brings a consistent
+# torch 2.8 + vLLM; we DO NOT install the [gpu] (flash-attn) extra — this pod has no nvcc, and
+# HF transformers auto-falls-back to SDPA attention for the actor, while vLLM uses its own.
 git clone https://github.com/langfengq/verl-agent ~/verl-agent
-cd ~/verl-agent && pip install -e . && pip install vllm
+cd ~/verl-agent && pip install -e '.[vllm]'
 ```
+> Note: this upgrades torch (pod ships 2.4.1) to the `[vllm]`-pinned build. If a wheel/CUDA
+> mismatch appears, pin a compatible `vllm` within verl-agent's `vllm>=0.8.5,<=0.11.0` range.
 
 ## 2. Register the `balatro` env into verl-agent
-verl-agent resolves `env.env_name` through its env registry / `make_envs`. Wire ours in:
-```bash
-# expose BalatroEnvManager to verl-agent's environment package
-ln -s ~/balatro-e6/balatro_rl/llm/verl_env.py \
-      ~/verl-agent/agent_system/environments/balatro_env.py
-```
-Then add a registry entry so `env_name: balatro` resolves to `BalatroEnvManager` (in
-`agent_system/environments/env_manager.py`'s `make_envs`):
+All the adapter code (vec env, projection, manager, factory) lives in this repo
+(`balatro_rl/llm/verl_env.py`, installed via `pip install -e '.[llm]'`) and is verified against
+verl-agent's real `EnvironmentManagerBase(envs, projection_f, config)` contract. The only pod-side
+edit is a **3-line hook** in `agent_system/environments/env_manager.py`'s `make_envs(config)` —
+add it as the first branch:
 ```python
-# inside make_envs(config): map config.env.env_name == "balatro"
-if config.env.env_name == "balatro":
-    from agent_system.environments.balatro_env import BalatroEnvManager
-    b = config.env.balatro
-    make = lambda: BalatroEnvManager(
-        n=config.env.rollout.n, reward_name=b.reward_name,
-        enable_bosses=b.enable_bosses, req_scale_start=b.req_scale_start,
-        req_scale_end=b.req_scale_end, seed=config.env.seed)
-    return make(), make()   # (train_envs, val_envs)
+    if "balatro" in config.env.env_name.lower():
+        from balatro_rl.llm.verl_env import make_balatro_envs
+        return make_balatro_envs(config)   # -> (train_manager, val_manager)
 ```
-> Verify `EnvironmentManagerBase`'s constructor + the `make_envs` return contract against the
-> installed verl-agent version; adapt `BalatroEnvManager.__init__`/`reset`/`step` shapes if they differ.
+That's it — no symlink, no manager edits. `make_balatro_envs` builds the train/val
+`BalatroEnvManager`s (each group of `rollout.n` rollouts shares a seed; curriculum ramps req_scale).
 
 ## 3. Placeholder dataset
 verl-agent still expects train/val parquet even when the env drives the task; a minimal stub suffices:

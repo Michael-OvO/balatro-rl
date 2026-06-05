@@ -68,7 +68,16 @@ class BalatroTextEnv:
             # Invalid: no engine step; re-present the cached obs (state unchanged) so the
             # trainer's invalid-action penalty fires. max_steps bounds repeated failures.
             return self._last_obs, 0.0, bool(state.done), self._info(valid=False, parse_error=res.error)
-        _, reward, done, info, _ = self._env.step(res.action_id)
+        return self.apply_action(res.action_id)
+
+    def apply_action(self, action_id) -> tuple[str, float, bool, dict]:
+        """Step the engine with a PRE-VALIDATED action_id (or None = invalid no-op). Used by the
+        vectorized verl path, where parsing happens once in the projection function and the env
+        just applies the result. None -> the cached obs is re-presented, reward 0.0, and
+        is_action_valid=False so the trainer's invalid-action penalty fires."""
+        if action_id is None:
+            return self._last_obs, 0.0, bool(self._env.state.done), self._info(valid=False)
+        _, reward, done, info, _ = self._env.step(action_id)
         if info.get("cleared"):
             self._cleared_any = True    # latch the cumulative "cleared >= 1 blind" curriculum signal
         self._refresh_obs()
