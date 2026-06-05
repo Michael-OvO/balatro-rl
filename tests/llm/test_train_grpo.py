@@ -11,6 +11,14 @@ def test_build_command_wraps_overrides_for_verl_agent():
     assert "env.env_name=balatro" in joined
 
 
+def test_build_command_loads_the_yaml_base():
+    # Must load configs/balatro_grpo.yaml so YAML-only settings (use_invalid_action_penalty,
+    # gigpo.step_advantage_w, ...) actually apply — overrides layer on top, one launch path.
+    joined = " ".join(build_command(ExperimentConfig()))
+    assert "--config-name=balatro_grpo" in joined
+    assert "--config-path=" in joined
+
+
 def test_build_command_reflects_config_overrides():
     cmd = build_command(ExperimentConfig(adv_estimator="grpo", group_size=4))
     joined = " ".join(cmd)

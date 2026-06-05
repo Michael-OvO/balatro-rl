@@ -25,14 +25,22 @@ def test_full_game_runs_through_text_interface_with_low_req_scale():
     env = BalatroTextEnv(reward_name="shaped")
     policy = ScriptedStubPolicy()
     obs, _ = env.reset(seed=0, req_scale=0.001)
-    done, steps, final_ante = False, 0, 1
+    done, steps, final_ante, cleared_any = False, 0, 1, False
     while not done and steps < 2000:
         action = policy.generate([{"role": "user", "content": obs}])
         obs, _reward, done, info = env.step(action)
         final_ante = info["ante"]
+        cleared_any = cleared_any or info["cleared"]
         steps += 1
     assert done and steps > 0
     assert final_ante >= 2                      # cleared ante 1 -> passed through shops
+    assert cleared_any                          # info["cleared"] latches once a blind is cleared
+
+
+def test_cleared_signal_is_false_before_any_blind_cleared():
+    env = BalatroTextEnv(reward_name="shaped")
+    _, info = env.reset(seed=0, req_scale=1.0)
+    assert info["cleared"] is False             # fresh game, nothing cleared yet
 
 
 def test_curriculum_req_scale_is_applied_at_reset():

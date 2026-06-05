@@ -13,6 +13,7 @@ runs the training command; it does not perform that registration.
 from __future__ import annotations
 
 import argparse
+import os
 import shlex
 
 from .config import ExperimentConfig
@@ -20,11 +21,21 @@ from .config import ExperimentConfig
 # verl-agent's training entrypoint module (verify against the installed version; the GRPO/GiGPO
 # recipes live under verl-agent's trainer — see docs/RUNPOD_M2.md).
 VERL_AGENT_MAIN = "verl.trainer.main_ppo"
+# configs/ lives at the repo root (this file is balatro_rl/llm/train_grpo.py).
+CONFIG_DIR = os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))),
+                          "configs")
+CONFIG_NAME = "balatro_grpo"
 
 
-def build_command(cfg: ExperimentConfig) -> list[str]:
-    """The full argv for launching verl-agent GRPO with this config's overrides."""
-    return ["python", "-m", VERL_AGENT_MAIN, *cfg.to_overrides()]
+def build_command(cfg: ExperimentConfig, config_dir: str = CONFIG_DIR,
+                  config_name: str = CONFIG_NAME) -> list[str]:
+    """The full argv for launching verl-agent GRPO. Loads configs/balatro_grpo.yaml as the BASE
+    (so YAML-only settings like use_invalid_action_penalty / gigpo.step_advantage_w actually
+    apply) and layers this config's overrides on top — one launch path, not two divergent ones.
+    The exact Hydra flag form may need adjusting to the installed verl-agent (see docs/RUNPOD_M2.md)."""
+    return ["python", "-m", VERL_AGENT_MAIN,
+            f"--config-path={config_dir}", f"--config-name={config_name}",
+            *cfg.to_overrides()]
 
 
 def _cfg_from_args(args) -> ExperimentConfig:

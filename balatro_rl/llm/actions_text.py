@@ -13,8 +13,8 @@ import json
 
 from ..engine.engine import Verb, legal_actions
 from ..envs.actions import MAX_SELECT, NUM_ACTIONS, encode_action, legal_mask
-from .serialize import (consumable_name, joker_name, pack_name, shop_offer_name,
-                        voucher_name)
+from .serialize import (consumable_name, joker_name, pack_name, serialize_state,
+                        shop_offer_name, voucher_name)
 
 _SUBSET_VERBS = {Verb.PLAY, Verb.DISCARD, Verb.USE_TARGET}
 
@@ -98,6 +98,15 @@ def render_menu(menu: Menu) -> str:
                      f'{{"action": "{card_verbs[0]}", "cards": [1 to {MAX_SELECT} hand indices]}} '
                      f'(a played/discarded hand is at most {MAX_SELECT} cards).')
     return "\n".join(lines)
+
+
+def observation_text(state, menu: "Menu | None" = None) -> str:
+    """The canonical text observation = serialized state + the rendered legal-action menu.
+    Single source of truth shared by LLMAgent (M1 eval) and BalatroTextEnv (M2 training) so the
+    two CANNOT drift into different prompt formats. Pass a prebuilt menu to avoid recomputing it."""
+    if menu is None:
+        menu = build_menu(state)
+    return serialize_state(state) + "\n\n" + render_menu(menu)
 
 
 @dataclasses.dataclass(frozen=True)

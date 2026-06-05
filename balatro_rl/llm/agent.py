@@ -10,10 +10,9 @@ from __future__ import annotations
 
 import numpy as np
 
-from .actions_text import build_menu, parse_action, render_menu
+from .actions_text import build_menu, observation_text, parse_action
 from .context import ConversationContext
 from .policy_client import Policy
-from .serialize import serialize_state
 
 SYSTEM_PROMPT = (
     "You are an expert Balatro player. Each turn you see the game state and a list of "
@@ -39,7 +38,7 @@ class LLMAgent:
         # Build the menu once and reuse the caller's mask (run_episode passes legal_mask(state));
         # parse_action then validates against these instead of recomputing legal_actions each retry.
         menu = build_menu(state)
-        observation = serialize_state(state) + "\n\n" + render_menu(menu)
+        observation = observation_text(state, menu)
         messages = self._ctx.render(observation)
         reply, chosen = "", None
         for _ in range(self._max_retries + 1):

@@ -40,8 +40,8 @@ class BalatroEnvManager(EnvironmentManagerBase):
     def __init__(self, n: int, reward_name: str = "shaped", enable_bosses: bool = False,
                  req_scale_start: float = 0.1, req_scale_end: float = 1.0, seed: int = 0,
                  **base_kwargs):
-        if HAVE_VERL_AGENT and base_kwargs:
-            super().__init__(**base_kwargs)
+        if HAVE_VERL_AGENT:
+            super().__init__(**base_kwargs)   # init the real base whenever verl-agent is present
         self._envs = [BalatroTextEnv(reward_name, enable_bosses) for _ in range(n)]
         self._n = n
         self._seed = seed
@@ -52,14 +52,17 @@ class BalatroEnvManager(EnvironmentManagerBase):
 
     def reset(self, kwargs=None):
         scale = self._curriculum.current
+        seed = self._seed                 # SAME seed for every env in the group (see below)
         infos = []
         for i, env in enumerate(self._envs):
-            # Distinct but deterministic per-env seed so a GRPO group explores varied games
-            # while staying reproducible across a resume.
-            obs, info = env.reset(seed=self._seed + i, req_scale=scale)
+            # All n rollouts in a GRPO/GiGPO group MUST face the same game: the advantage is
+            # group-relative (subtracts the group mean as a baseline), valid only when the task
+            # is shared — the variance comes from temperature sampling, not from different decks.
+            # GiGPO's anchor-based step grouping likewise needs identical states across rollouts.
+            obs, info = env.reset(seed=seed, req_scale=scale)
             self._obs_cache[i] = obs
             infos.append(info)
-        self._seed += self._n
+        self._seed += 1                   # next group -> next task/seed
         return {"text": list(self._obs_cache), "image": None, "anchor": list(self._obs_cache)}, infos
 
     def step(self, text_actions):
@@ -90,9 +93,12 @@ class BalatroEnvManager(EnvironmentManagerBase):
         for bs in range(len(total_batch_list)):
             for i in reversed(range(len(total_batch_list[bs]))):
                 if total_batch_list[bs][i].get("active_masks"):
-                    won = float(total_infos[bs][i].get("won", 0.0))
-                    results.append(won)
-                    self._curriculum.record(cleared=total_infos[bs][i].get("ante", 1) > 1)
+                    info = total_infos[bs][i]
+                    results.append(float(info.get("won", 0.0)))
+                    # Curriculum signal = "cleared >= 1 blind this episode" (the cumulative flag
+                    # BalatroTextEnv latches into info["cleared"]), NOT ante>1 which needs a full
+                    # 3-blind ante and would stall the ramp at its floor.
+                    self._curriculum.record(cleared=bool(info.get("cleared", False)))
                     break
         self._curriculum.maybe_ramp()      # ramp req_scale for the NEXT reset on rolling clear-rate
         return {"success_rate": np.asarray(results, dtype=np.float32)}
