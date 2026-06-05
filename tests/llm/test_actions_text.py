@@ -34,6 +34,14 @@ def test_render_menu_includes_indices_and_card_instructions():
     assert "play" in text.lower() and "cards" in text.lower()
 
 
+def test_render_menu_states_the_five_card_play_cap():
+    # Regression: the menu must tell the model a played/discarded hand is capped at 5 cards.
+    # Without it a frozen model tries to play all 8 -> illegal -> safe-fallback weak play.
+    from balatro_rl.envs.actions import MAX_SELECT
+    text = render_menu(build_menu(engine.reset(0)))
+    assert str(MAX_SELECT) in text and "at most" in text.lower()
+
+
 from balatro_rl.envs.actions import decode, legal_mask
 from balatro_rl.llm.actions_text import parse_action
 

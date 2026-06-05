@@ -12,7 +12,7 @@ import dataclasses
 import json
 
 from ..engine.engine import Verb, legal_actions
-from ..envs.actions import NUM_ACTIONS, encode_action, legal_mask
+from ..envs.actions import MAX_SELECT, NUM_ACTIONS, encode_action, legal_mask
 from .serialize import (consumable_name, joker_name, pack_name, shop_offer_name,
                         voucher_name)
 
@@ -95,7 +95,8 @@ def render_menu(menu: Menu) -> str:
     if card_verbs:
         verbs = " / ".join(f"{v} cards" for v in card_verbs)
         lines.append(f'To {verbs}, reply with JSON: '
-                     f'{{"action": "{card_verbs[0]}", "cards": [hand indices]}}')
+                     f'{{"action": "{card_verbs[0]}", "cards": [1 to {MAX_SELECT} hand indices]}} '
+                     f'(a played/discarded hand is at most {MAX_SELECT} cards).')
     return "\n".join(lines)
 
 
