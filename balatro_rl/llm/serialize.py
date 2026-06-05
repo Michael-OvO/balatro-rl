@@ -82,6 +82,71 @@ def _hand_block(state) -> str:
     return "\n".join(lines)
 
 
+def _jokers_block(state) -> str:
+    lines = ["Jokers (left to right):"]
+    for i, js in enumerate(state.jokers):
+        ctr = f" x{js.counter:g}" if js.counter else ""
+        desc = descriptions.joker_desc(js.type)
+        lines.append(f"  [{i}] {joker_name(js)}{ctr} - {desc}")
+    return "\n".join(lines)
+
+
+def _consumables_block(state) -> str:
+    lines = [f"Consumables ({len(state.consumables)}/{state.consumable_slots}):"]
+    for i, con in enumerate(state.consumables):
+        desc = descriptions.consumable_desc(con.kind, con.type_id)
+        lines.append(f"  [{i}] {consumable_name(con)} - {desc}")
+    return "\n".join(lines)
+
+
+def _shop_block(state) -> str:
+    lines = ["Shop offers:"]
+    for i, offer in enumerate(state.shop_offers):
+        if int(offer.kind) == int(ShopKind.JOKER):
+            desc = descriptions.joker_desc(offer.type_id)
+        else:
+            desc = descriptions.consumable_desc(SHOP_TO_CONSUMABLE_KIND[offer.kind], offer.type_id)
+        lines.append(f"  [{i}] {shop_offer_name(offer)} (${offer.cost}) - {desc}")
+    if state.pack_offers:
+        lines.append("Packs:")
+        for i, pack in enumerate(state.pack_offers):
+            lines.append(f"  [{i}] {pack_name(pack)} (${pack.cost})")
+    if state.voucher_offer:
+        lines.append(f"Voucher: {voucher_name(state.voucher_offer)} - "
+                     f"{descriptions.voucher_desc(state.voucher_offer)}")
+    return "\n".join(lines)
+
+
+def _pack_open_block(state) -> str:
+    lines = [f"Opened pack - pick {state.pack_picks}:"]
+    for i, item in enumerate(state.pack_open):
+        lines.append(f"  [{i}] {_pack_item_name(item)}")
+    return "\n".join(lines)
+
+
+def _pack_item_name(item) -> str:
+    from ..engine.packs import PackItemKind
+    if int(item.kind) == int(PackItemKind.JOKER):
+        return f"{joker_name(item.payload)} - {descriptions.joker_desc(item.payload.type)}"
+    con = item.payload
+    return f"{consumable_name(con)} - {descriptions.consumable_desc(con.kind, con.type_id)}"
+
+
+def _vouchers_block(state) -> str:
+    names = ", ".join(voucher_name(v) for v in state.vouchers)
+    return f"Owned vouchers: {names}"
+
+
 def serialize_state(state) -> str:
     blocks = [_header(state), _hand_block(state)]
+    if state.jokers:
+        blocks.append(_jokers_block(state))
+    if state.consumables:
+        blocks.append(_consumables_block(state))
+    if state.phase == Phase.SHOP:
+        blocks.append(_shop_block(state))
+    if state.phase == Phase.OPEN_PACK:
+        blocks.append(_pack_open_block(state))
+    if state.vouchers:
+        blocks.append(_vouchers_block(state))
     return "\n".join(b for b in blocks if b)
