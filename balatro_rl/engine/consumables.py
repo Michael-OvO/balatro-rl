@@ -93,8 +93,8 @@ DEFERRED_TAROTS: frozenset = frozenset({TarotType.THE_FOOL, TarotType.THE_WHEEL_
 IMPLEMENTED_TAROTS: tuple = tuple(t for t in TarotType if t not in DEFERRED_TAROTS)
 
 # Card-targeting Tarots: those that modify SELECTED hand cards (vs. money/create effects).
-# `consumable_needs_target` returns True for these, and legal_actions withholds their USE
-# (the agent stays blind to targeting until the Phase E5 obs/action widening).
+# `consumable_needs_target` returns True for these; legal_actions offers their USE as the
+# two-step arm (a bare USE arms the Tarot; a following USE_TARGET applies it to hand cards).
 _ENHANCE_TAROT: dict[TarotType, Enhancement] = {
     TarotType.THE_MAGICIAN: Enhancement.LUCKY,
     TarotType.THE_EMPRESS: Enhancement.MULT,
@@ -144,10 +144,17 @@ def tarot(ttype: TarotType) -> Consumable:
 
 def consumable_needs_target(con: Consumable) -> bool:
     """True iff USEing this consumable requires selecting target HAND cards (the card-
-    targeting Tarots). The engine uses this to withhold their USE from legal_actions
-    (the agent is blind to targeting until E5); Planets and no-target Tarots return False."""
+    targeting Tarots). The engine uses this to route their USE through the two-step arm
+    (a bare USE arms it, then USE_TARGET applies it); Planets and no-target Tarots return False."""
     return (con.kind == int(ConsumableKind.TAROT)
             and con.type_id in CARD_TARGETING_TAROTS)
+
+
+# Tarots that need EXACTLY max_targets cards (not 1..max): Death copies one card onto another,
+# so a size-1 selection is a no-op that wastes the Tarot. The pending two-step offers only
+# exactly-N subsets for these (see min_targets); every other targeting Tarot enhances/converts
+# "up to N" and accepts any 1..N.
+EXACT_TARGET_TAROTS: frozenset = frozenset({TarotType.DEATH})
 
 
 def max_targets(con: Consumable) -> int:
@@ -157,6 +164,16 @@ def max_targets(con: Consumable) -> int:
     if not consumable_needs_target(con):
         return 0
     return _TAROT_MAX_TARGETS[TarotType(con.type_id)]
+
+
+def min_targets(con: Consumable) -> int:
+    """Minimum hand cards a targeting consumable's USE_TARGET must select: equals max_targets for
+    the exactly-N Tarots (Death needs exactly 2), else 1; 0 for non-targeting. The engine bounds
+    the offered USE_TARGET subsets to [min_targets, max_targets] so a too-small pick can't silently
+    waste the Tarot, and only arms a targeting Tarot when the hand holds at least this many cards."""
+    if not consumable_needs_target(con):
+        return 0
+    return max_targets(con) if TarotType(con.type_id) in EXACT_TARGET_TAROTS else 1
 
 
 def _bump_rank(rank: int) -> int:
@@ -233,7 +250,10 @@ def _apply_create_tarot(state, ttype: TarotType, rng):
         from .jokers.base import JokerState, REGISTRY, Rarity
         from .jokers import library as _library  # noqa: F401  populate REGISTRY
         from .engine import JOKER_SLOTS
-        if len(state.jokers) >= JOKER_SLOTS:
+        from .vouchers import extra_joker_slots
+        # Voucher-aware cap (matches every other joker-slot check): with Antimatter the cap is 6,
+        # so Judgement can fill the 6th slot instead of silently no-opping at 5.
+        if len(state.jokers) >= JOKER_SLOTS + extra_joker_slots(state.vouchers):
             return {}, rng
         # Pool: any non-Legendary registered joker (deterministic registry order).
         pool = [t for t in REGISTRY if REGISTRY[t].rarity != Rarity.LEGENDARY]

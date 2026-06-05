@@ -40,10 +40,6 @@ D_MODEL = int(os.environ.get("BALATRO_DMODEL", 64 if SMOKE else 256))
 NUM_ENVS = int(os.environ.get("BALATRO_NUM_ENVS", 8 if SMOKE else 64))
 NUM_UPDATES = int(os.environ.get("BALATRO_UPDATES", 5 if SMOKE else 2000))
 NUM_MB = 2 if SMOKE else 8
-# Exposure OFF: the enhanced-card "crutch" made an earlier retrain rely on mods it doesn't have
-# at deploy. The agent must learn the real, plain-deck game; the curriculum bootstraps it instead.
-ENHANCE_RATE = 0.0
-GRANT_PLANETS = 0
 
 
 def _ent(u: int) -> float:
@@ -58,7 +54,6 @@ def build_config() -> TrainConfig:
         reward_name="shaped", seed=0, ent_coef=_ent,
         curr_floor=0.2, ramp_clear_rate=0.7, ramp_step=0.05, ramp_window=20,
         enable_bosses=True, boss_curriculum=True,          # E5: bosses fade in with the score bar
-        enhance_rate=ENHANCE_RATE, grant_planets=GRANT_PLANETS,
         eval_interval=(2 if SMOKE else 50), eval_seeds=(0, 1, 2, 3),
     )
 
@@ -112,8 +107,7 @@ def main():
     net = ActorCritic(action_dim=NUM_ACTIONS, d_model=D_MODEL)
     for s in (4, 7):
         steps = record_agent_episode(net, result.params, seed=s, reward_name="shaped",
-                                     enable_bosses=True, enhance_rate=ENHANCE_RATE,
-                                     grant_planets=GRANT_PLANETS)
+                                     enable_bosses=True)
         path = os.path.join(OUT, f"retrain_e5_seed{s}.episode.json")
         save_episode(steps, path)
         print(f"[retrain] recorded {len(steps)} steps -> {path}", flush=True)

@@ -41,9 +41,7 @@ class TrainConfig:
     ent_coef: typing.Union[float, typing.Callable[[int], float]] = 0.01
     reward_name: str = "shaped"
     seed: int = 0
-    enable_bosses: bool = False     # boss blinds in the training env (Phase D retrain)
-    enhance_rate: float = 0.0       # prob each deck card starts enhanced (retrain exposure)
-    grant_planets: int = 0          # # of Planet consumables to start with (retrain exposure)
+    enable_bosses: bool = False     # boss blinds in the training env
     eval_interval: int = 0          # run greedy eval every N updates (0 = off)
     eval_seeds: tuple = (0, 1, 2, 3)
     # Curriculum: shrink the blind target so the agent experiences clearing, then ramp to 1.0.
@@ -79,11 +77,14 @@ def _ent_coef_at(ent_coef, update_idx: int) -> float:
     return float(ent_coef(update_idx)) if callable(ent_coef) else float(ent_coef)
 
 
-def _ramp_scale(cur_scale: float, clear_rate: float, window_full: bool, cfg) -> float:
-    """Closed-loop curriculum: once the clear-rate window is full AND the agent clears
-    reliably (clear_rate > ramp_clear_rate), raise the blind target toward the real game
-    (1.0) by ramp_step; otherwise hold. Already at 1.0 stays at 1.0."""
-    if cur_scale < 1.0 and window_full and clear_rate > cfg.ramp_clear_rate:
+def _ramp_scale(cur_scale: float, clear_rate: float, can_bump: bool, cfg) -> float:
+    """Closed-loop curriculum: when a bump is allowed (window full AND the post-bump cooldown has
+    elapsed) AND the agent clears reliably at the CURRENT scale (clear_rate > ramp_clear_rate),
+    raise the blind target toward the real game (1.0) by ramp_step; otherwise hold. Already at 1.0
+    stays at 1.0. The cooldown is what gates `can_bump` — without it the sliding window still holds
+    clear-rates from the easier prior scale right after a bump, so the gate would re-fire and race
+    0.2->1.0 in ~ramp_step^-1 updates without ever measuring the new scale."""
+    if cur_scale < 1.0 and can_bump and clear_rate > cfg.ramp_clear_rate:
         return min(1.0, round(cur_scale + cfg.ramp_step, 4))
     return cur_scale
 
@@ -158,7 +159,6 @@ def train(cfg: TrainConfig, logger=None, init_params=None) -> TrainResult:
         return float(scale) if cfg.boss_curriculum else 1.0
     venv = SyncVectorEnv(cfg.num_envs, cfg.reward_name, base_seed=cfg.seed + 1000,
                          req_scale=cur_scale, enable_bosses=cfg.enable_bosses,
-                         enhance_rate=cfg.enhance_rate, grant_planets=cfg.grant_planets,
                          boss_rate=_boss_rate_for(cur_scale))
     next_obs, next_mask = venv.reset()
     T, N = cfg.num_steps, cfg.num_envs
@@ -176,9 +176,15 @@ def train(cfg: TrainConfig, logger=None, init_params=None) -> TrainResult:
     # made the 0.7 gate meaningless). ep_cleared persists across updates (episodes span
     # rollouts). The windows SLIDE (maxlen) and are NOT reset on a bump (bug fix), so the
     # ramp tracks a moving average instead of waiting a full fresh window after each +scale.
+    # A COOLDOWN (updates_since_bump) gates consecutive bumps: after a +scale the window still
+    # holds clear-rates measured at the EASIER prior scale, so without a cooldown the gate would
+    # re-fire every update and race 0.2->1.0 before the new (harder) scale is ever evaluated.
+    # Requiring ramp_window updates between bumps lets the window refill at the new scale first.
+    # Init at ramp_window so the FIRST bump waits only on the window filling, not the cooldown.
     ep_cleared = np.zeros(cfg.num_envs, bool)
     cleared_w = collections.deque(maxlen=cfg.ramp_window)
     episodes_w = collections.deque(maxlen=cfg.ramp_window)
+    updates_since_bump = cfg.ramp_window
 
     for _ in range(cfg.num_updates):
         ec = _ent_coef_at(cfg.ent_coef, len(losses))   # 0-based index of THIS update
@@ -250,14 +256,19 @@ def train(cfg: TrainConfig, logger=None, init_params=None) -> TrainResult:
                     "train/max_hand_score": update_max_hand_score,
                     "train/max_round_score": update_max_round}, step=update_idx)
         if not _open_loop:
-            new_scale = _ramp_scale(cur_scale, clear_rate, len(episodes_w) == cfg.ramp_window, cfg)
+            window_full = len(episodes_w) == cfg.ramp_window
+            can_bump = window_full and updates_since_bump >= cfg.ramp_window
+            new_scale = _ramp_scale(cur_scale, clear_rate, can_bump, cfg)
             if new_scale != cur_scale:
                 cur_scale = new_scale
+                updates_since_bump = 0          # cooldown: re-measure clear-rate at the new scale
                 venv.set_req_scale(cur_scale)   # windows SLIDE (no reset) -> moving-average ramp
                 venv.set_boss_rate(_boss_rate_for(cur_scale))   # bosses fade in with the score bar
+            else:
+                updates_since_bump += 1
         if cfg.eval_interval and (update_idx % cfg.eval_interval == 0):
-            # Eval on the DEPLOY target: the real game (full req_scale, bosses as trained,
-            # plain deck -> exposure OFF), not the training distribution it never deploys to.
+            # Eval on the DEPLOY target: the real game (full req_scale, bosses as trained),
+            # not the training distribution it never deploys to.
             metrics = evaluate(net, ts.params, cfg.eval_seeds, cfg.reward_name,
                                enable_bosses=cfg.enable_bosses, req_scale=1.0)
             eval_history.append(metrics)

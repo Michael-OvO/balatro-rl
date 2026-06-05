@@ -31,16 +31,14 @@ def _depth(s) -> int:
 
 
 def evaluate(net, params, seeds, reward_name: str = "shaped", *,
-             enable_bosses: bool = False, enhance_rate: float = 0.0,
-             grant_planets: int = 0, req_scale: float = 1.0) -> dict:
-    """Greedy eval. By default the plain real game; pass `enable_bosses`/exposure/`req_scale`
+             enable_bosses: bool = False, req_scale: float = 1.0) -> dict:
+    """Greedy eval. By default the plain real game; pass `enable_bosses`/`req_scale`
     to evaluate on the training distribution (so train-time metrics aren't measuring a
     distribution the agent never saw)."""
     apply = jax.jit(net.apply)   # compile the forward once; reused across all steps/seeds
     antes, wins, chips, lengths, depths = [], [], [], [], []
     for seed in seeds:
-        env = BalatroEnv(reward_name, req_scale=req_scale, enable_bosses=enable_bosses,
-                         enhance_rate=enhance_rate, grant_planets=grant_planets)
+        env = BalatroEnv(reward_name, req_scale=req_scale, enable_bosses=enable_bosses)
         obs, mask = env.reset(int(seed))
         run_chips, steps, done, max_depth = 0, 0, False, 0
         while not done and steps < _MAX_STEPS:

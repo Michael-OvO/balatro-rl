@@ -115,14 +115,16 @@ class TrackioLogger:
       GPU is saturated or the CPU env-stepping is the limiter)."""
 
     def __init__(self, project: str, name=None, config=None, space_id=None,
-                 private=False, auto_log_gpu=False, gpu_log_interval=15.0):
+                 private=False, auto_log_gpu=False, gpu_log_interval=10.0):
         import trackio
         self._trackio = trackio
         kw = dict(project=project, name=name, config=config)
         if space_id:                      # hosted dashboard on a HF Space (shareable url)
             kw.update(space_id=space_id, private=private)
-        if auto_log_gpu:                  # GPU util/mem traces (only meaningful on a GPU box)
-            kw.update(auto_log_gpu=True, gpu_log_interval=gpu_log_interval)
+        # Forward auto_log_gpu UNCONDITIONALLY: omitting it lets trackio's default self-detect an
+        # Apple-Silicon GPU and log metrics on a Mac when we explicitly meant "off" (callers only
+        # pass auto_log_gpu=True on a real GPU box).
+        kw.update(auto_log_gpu=bool(auto_log_gpu), gpu_log_interval=gpu_log_interval)
         trackio.init(**kw)
 
     def log(self, metrics: dict, step=None):

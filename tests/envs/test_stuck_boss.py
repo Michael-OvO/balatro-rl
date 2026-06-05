@@ -50,7 +50,7 @@ def test_env_never_exposes_a_live_empty_mask_under_bosses():
     import random
     import numpy as np
     for seed in range(40):
-        env = BalatroEnv(enable_bosses=True, enhance_rate=0.3, grant_planets=1)
+        env = BalatroEnv(enable_bosses=True)
         _obs, mask = env.reset(seed)
         for t in range(400):
             assert mask.sum() > 0                    # a non-done state always has a legal move
