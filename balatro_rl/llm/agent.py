@@ -39,7 +39,7 @@ class LLMAgent:
         observation = serialize_state(state) + "\n\n" + render_menu(build_menu(state))
         messages = self._ctx.render(observation)
         reply, chosen = "", None
-        for attempt in range(self._max_retries + 1):
+        for _ in range(self._max_retries + 1):
             reply = self._policy.generate(messages)
             res = parse_action(reply, state)
             if res.error is None:
@@ -52,5 +52,6 @@ class LLMAgent:
             ]
         if chosen is None:
             chosen = int(np.flatnonzero(mask)[0])    # safe legal fallback
+            reply = "(no valid action parsed; defaulted to the first legal action)"
         self._ctx.update(assistant_reply=reply, observation="")
         return chosen

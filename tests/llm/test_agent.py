@@ -40,3 +40,15 @@ def test_act_passes_serialized_state_to_the_policy():
     agent.act(state, legal_mask(state))
     last_user_msg = policy.calls[-1][-1]["content"]
     assert "Ante 1" in last_user_msg and "Legal actions" in last_user_msg
+
+
+def test_fallback_does_not_store_garbage_reply_in_context():
+    class _Garbage:
+        def generate(self, messages):
+            return "no json here"
+    agent = LLMAgent(policy=_Garbage(), max_retries=1)
+    state = engine.reset(0)
+    agent.act(state, legal_mask(state))
+    last_reply = agent._ctx._turns[-1][1]   # (observation, assistant_reply)
+    assert "no json here" not in last_reply
+    assert "defaulted" in last_reply
