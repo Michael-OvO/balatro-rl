@@ -296,3 +296,49 @@ def pack_desc(kind, size=None) -> str:
         return ""
     prefix = _PACK_SIZE_NAME.get(int(size), "") if size is not None else ""
     return prefix + base
+
+
+# --- Canonical display NAMES (single source of truth; consumed by both envs/llm and viz) ---
+
+def pretty(name: str) -> str:
+    """An UPPER_SNAKE enum name -> 'Title Case' display string (e.g. THE_FOOL -> 'The Fool')."""
+    return name.replace("_", " ").title()
+
+
+def joker_name(joker_type) -> str:
+    """Display name for a JokerType (or its int id). "" if unknown."""
+    try:
+        return pretty(JokerType(int(joker_type)).name)
+    except (TypeError, ValueError):
+        return ""
+
+
+def consumable_name(kind, type_id) -> str:
+    """Display name for a consumable, dispatched on its ConsumableKind (PLANET/TAROT;
+    SPECTRAL or unknown -> 'Spectral'). "" on an unparseable kind."""
+    try:
+        k = int(kind)
+    except (TypeError, ValueError):
+        return ""
+    if k == int(ConsumableKind.PLANET):
+        return pretty(PlanetType(int(type_id)).name)
+    if k == int(ConsumableKind.TAROT):
+        return pretty(TarotType(int(type_id)).name)
+    return "Spectral"
+
+
+def voucher_name(vtype) -> str:
+    """Display name for a VoucherType (or its int id). "" if unknown."""
+    from .vouchers import VoucherType
+    try:
+        return pretty(VoucherType(int(vtype)).name)
+    except (TypeError, ValueError):
+        return ""
+
+
+def boss_name(boss) -> str:
+    """Display name for a BossEffect (or its int id). "" if unknown."""
+    try:
+        return pretty(BossEffect(int(boss)).name)
+    except (TypeError, ValueError):
+        return ""

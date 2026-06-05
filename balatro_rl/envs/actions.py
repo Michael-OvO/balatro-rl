@@ -4,7 +4,7 @@ Layout (NUM_ACTIONS = 708):
   [0, 218)        PLAY    subset = _SUBSETS[id]
   [218, 436)      DISCARD subset = _SUBSETS[id - 218]
   SHOP_BASE=436:
-    +0..+3        BUY  offer slot 0..3   (MAX_SHOP=4, incl. the Overstock slots; joker OR consumable)
+    +0..+3        BUY  offer slot 0..3   (MAX_SHOP=4 = CARD_SLOTS + Overstock(+Plus); joker OR consumable)
     +4..+9        SELL joker slot 0..5   (MAX_JOKERS=6, incl. the Antimatter slot)
     +10           REROLL
     +11..+40      REORDER pair _PAIRS[k]  (30 ordered (i,j), i!=j, over MAX_JOKERS)
@@ -34,7 +34,7 @@ from ..engine.engine import Verb, legal_actions
 MAX_HAND = 8
 MAX_SELECT = 5
 MAX_JOKERS = 6     # JOKER_SLOTS (5) + the Antimatter voucher's +1; the real-game cap
-MAX_SHOP = 4       # CARD_SLOTS (2) + Overstock(+1) + Overstock Plus(+1); the real-game cap
+MAX_SHOP = 4       # CARD_SLOTS (2) + Overstock + Overstock Plus (the real-game max shop card slots)
 MAX_CONSUM = 3     # consumable slots: base 2 + the Crystal Ball voucher's +1 (USE action ids)
 MAX_PACK = 2       # PACK_SLOTS (booster-pack offer slots)
 MAX_PACK_ITEMS = 5  # most an OPEN_PACK ever reveals (Jumbo/Mega = 5 shown)
@@ -49,7 +49,7 @@ _PAIRS: list[tuple[int, int]] = [(i, j) for i in range(MAX_JOKERS) for j in rang
 _PAIR_INDEX: dict[tuple[int, int], int] = {p: k for k, p in enumerate(_PAIRS)}
 
 SHOP_BASE = 2 * PLAY_N                  # 436
-_BUY0 = SHOP_BASE                       # +0..+3   (436..439; MAX_SHOP=4)
+_BUY0 = SHOP_BASE                       # +0..+3   (436..439; MAX_SHOP=4, kind-agnostic offer slot)
 _SELL0 = SHOP_BASE + MAX_SHOP           # +4..+9   (440..445; MAX_JOKERS=6)
 _REROLL = _SELL0 + MAX_JOKERS           # +10      (446)
 _REORDER0 = _REROLL + 1                 # +11..+40 (447..476; 30 pairs)
@@ -101,6 +101,8 @@ def encode_action(verb, arg) -> int:
     if verb == Verb.DISCARD:
         return PLAY_N + _SUBSET_INDEX[tuple(arg)]
     if verb == Verb.BUY:
+        if arg >= MAX_SHOP:
+            raise ValueError(f"BUY offer slot {arg} >= MAX_SHOP ({MAX_SHOP})")
         return _BUY0 + arg
     if verb == Verb.SELL:
         return _SELL0 + arg

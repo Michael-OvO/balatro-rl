@@ -11,7 +11,9 @@ from balatro_rl.viz.replay_data import _joker_d, _consum_d, _boss_d
 
 def test_joker_d_includes_effect_description():
     d = _joker_d(JokerState(type=JokerType.GREEDY))
-    assert d["name"] == "GREEDY" and d["desc"]            # non-empty effect text
+    # Canonical title-case display name (engine.descriptions.joker_name), now shared with
+    # the LLM serialize layer so the viewer and the agent label jokers identically.
+    assert d["name"] == "Greedy" and d["desc"]            # non-empty effect text
 
 
 def test_consum_d_planet_name_and_desc():

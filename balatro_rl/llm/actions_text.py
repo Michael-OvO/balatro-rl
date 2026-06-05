@@ -9,6 +9,7 @@ checked against legal_mask so an illegal action can never be returned.
 from __future__ import annotations
 
 import dataclasses
+import json
 
 from ..engine.engine import Verb, legal_actions
 from ..envs.actions import NUM_ACTIONS, encode_action, legal_mask
@@ -92,7 +93,84 @@ def render_menu(menu: Menu) -> str:
     if menu.can_target:
         card_verbs.append("target")
     if card_verbs:
-        verbs = " / ".join(card_verbs)
-        lines.append(f'To {verbs} cards, reply with JSON: '
+        verbs = " / ".join(f"{v} cards" for v in card_verbs)
+        lines.append(f'To {verbs}, reply with JSON: '
                      f'{{"action": "{card_verbs[0]}", "cards": [hand indices]}}')
     return "\n".join(lines)
+
+
+@dataclasses.dataclass(frozen=True)
+class ParseResult:
+    action_id: int | None = None
+    error: str | None = None
+
+
+def _extract_json(reply: str):
+    """Find the model's action object in a free-text reply. Scans for every balanced
+    {...} span and returns the LAST one that parses to a dict. Robust to stray braces
+    in the model's pre-JSON reasoning (the system prompt invites it to "think briefly"
+    first), which a naive first-'{'..last-'}' span would mis-capture into invalid JSON."""
+    spans: list[str] = []
+    depth = start = 0
+    started = False
+    for i, ch in enumerate(reply):
+        if ch == "{":
+            if not started:
+                start, started = i, True
+            depth += 1
+        elif ch == "}" and started:
+            depth -= 1
+            if depth == 0:
+                spans.append(reply[start:i + 1])
+                started = False
+    for span in reversed(spans):
+        try:
+            obj = json.loads(span)
+        except json.JSONDecodeError:
+            continue
+        if isinstance(obj, dict):
+            return obj
+    return None
+
+
+_CARD_VERB = {"play": Verb.PLAY, "discard": Verb.DISCARD, "target": Verb.USE_TARGET}
+
+
+def parse_action(reply: str, state, menu: "Menu | None" = None, mask=None) -> ParseResult:
+    """Parse an LLM reply into a validated flat action id. `menu` and `mask` may be passed
+    in to avoid recomputing build_menu(state)/legal_mask(state) when the caller already has
+    them (act() does); when omitted they are derived from `state` (back-compatible)."""
+    obj = _extract_json(reply)
+    if obj is None:
+        return ParseResult(error="no JSON object found in reply")
+    if mask is None:
+        mask = legal_mask(state)
+    if "choice" in obj:
+        try:
+            idx = int(obj["choice"])
+        except (TypeError, ValueError):
+            return ParseResult(error=f"choice is not an int: {obj['choice']!r}")
+        options = (menu if menu is not None else build_menu(state)).options
+        if not 0 <= idx < len(options):
+            return ParseResult(error=f"choice {idx} out of range 0..{len(options) - 1}")
+        aid = options[idx].action_id
+        if not mask[aid]:
+            return ParseResult(error=f"choice {idx} maps to an illegal action")
+        return ParseResult(action_id=aid)
+    action = str(obj.get("action", "")).lower()
+    if action in _CARD_VERB:
+        cards = obj.get("cards")
+        if not isinstance(cards, list) or not cards:
+            return ParseResult(error="'cards' must be a non-empty list of hand indices")
+        try:
+            subset = tuple(sorted({int(c) for c in cards}))
+        except (TypeError, ValueError):
+            return ParseResult(error=f"'cards' has non-integer entries: {cards!r}")
+        try:
+            aid = encode_action(_CARD_VERB[action], subset)
+        except (KeyError, ValueError):
+            return ParseResult(error=f"{action} {list(subset)} is not an encodable subset")
+        if not mask[aid]:
+            return ParseResult(error=f"{action} {list(subset)} is not legal right now")
+        return ParseResult(action_id=aid)
+    return ParseResult(error=f"unrecognized action object: {obj!r}")

@@ -91,7 +91,7 @@ class ActorCritic(nn.Module):
         je = embed(obs["joker_types"]) + nn.Dense(d)(obs["joker_counter"][..., None]) + seg[1]  # [B,6,d]
         # shop slot = joker embed (if a joker offer) + consumable embed (if a consumable offer) + cost
         se = (embed(obs["shop_types"]) + cembed(obs["shop_consum"])
-              + nn.Dense(d)(obs["shop_cost"][..., None]) + seg[2])      # [B,4,d]
+              + nn.Dense(d)(obs["shop_cost"][..., None]) + seg[2])      # [B,MAX_SHOP,d]
         ce = cembed(obs["consum_types"]) + seg[3]                      # [B,MAX_CONSUM,d] owned consumables
         # pack OFFERS (shop) and revealed pack ITEMS (OPEN_PACK)
         pe = (pkembed(obs["pack_kind"]) + psembed(obs["pack_size"])

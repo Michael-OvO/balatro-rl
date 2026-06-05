@@ -60,3 +60,17 @@ def test_shop_block_lists_offers_with_cost_when_in_shop():
     assert "Shop" in text
     assert "Joker" in text
     assert "$2" in text
+
+
+def test_armed_targeting_tarot_is_visible_in_serialize():
+    # When a card-targeting Tarot is ARMED (pending_consumable set), the only legal move is
+    # USE_TARGET; serialize must surface the armed consumable, its target-count, and the format.
+    from balatro_rl.engine.consumables import TarotType, max_targets
+    state = engine.reset(0)                         # PLAYING with a hand
+    magician = Consumable(kind=int(ConsumableKind.TAROT), type_id=int(TarotType.THE_MAGICIAN))
+    state = dataclasses.replace(state, consumables=(magician,), pending_consumable=0)
+    text = serialize_state(state)
+    assert "ARMED" in text
+    assert "Magician" in text
+    assert "target" in text.lower()
+    assert str(max_targets(magician)) in text       # the target-count bound is shown
