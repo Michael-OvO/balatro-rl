@@ -69,7 +69,7 @@ def _header(state) -> str:
         boss = f" | BOSS: {_pretty(BossEffect(state.boss).name)} ({descriptions.boss_desc(state.boss)})"
     blind = _BLIND_NAME.get(state.blind_index, str(state.blind_index))
     return (
-        f"Phase: {Phase(state.phase).name} | Ante {state.ante}, {blind} blind{boss}\n"
+        f"Phase: {_pretty(Phase(state.phase).name)} | Ante {state.ante}, {blind} blind{boss}\n"
         f"Score: {state.round_score}/{state.required} | Hands left: {state.hands_left} | "
         f"Discards left: {state.discards_left} | Money: ${state.money}"
     )
