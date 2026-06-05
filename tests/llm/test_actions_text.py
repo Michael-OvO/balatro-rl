@@ -68,3 +68,13 @@ def test_parse_rejects_unparseable_reply():
     state = engine.reset(0)
     res = parse_action("I think I will play the kings.", state)
     assert res.error is not None
+
+
+def test_parse_rejects_legal_shape_but_illegal_action():
+    # A play-cards call is well-formed and encodable, but playing is illegal in SHOP.
+    # The mask gate must reject it (this is the engine-safety boundary).
+    state = engine.reset(0)
+    state = dataclasses.replace(state, phase=Phase.SHOP, money=10, shop_offers=())
+    res = parse_action('{"action": "play", "cards": [0]}', state)
+    assert res.action_id is None
+    assert res.error is not None
