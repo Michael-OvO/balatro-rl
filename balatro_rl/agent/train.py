@@ -89,7 +89,11 @@ def _ramp_scale(cur_scale: float, clear_rate: float, can_bump: bool, cfg) -> flo
     return cur_scale
 
 
-def train(cfg: TrainConfig, logger=None, init_params=None) -> TrainResult:
+def train(cfg: TrainConfig, logger=None, init_params=None, on_update=None) -> TrainResult:
+    """Train a card-aware PPO agent. `on_update(update_idx, params)`, if given, is called at the
+    end of every update with the live params — the entrypoint uses it to checkpoint periodically
+    so a long (multi-hour) run can't lose everything to a late crash. train() stays agnostic to
+    serialization/filesystem; the callback decides cadence and where to write."""
     if logger is None:
         logger = NullLogger()
     key = jax.random.PRNGKey(cfg.seed)
@@ -273,6 +277,8 @@ def train(cfg: TrainConfig, logger=None, init_params=None) -> TrainResult:
                                enable_bosses=cfg.enable_bosses, req_scale=1.0)
             eval_history.append(metrics)
             logger.log(metrics, step=update_idx)
+        if on_update is not None:        # periodic checkpoint hook (entrypoint decides cadence)
+            on_update(update_idx, ts.params)
 
     logger.finish()
     return TrainResult(params=ts.params, losses=losses, mean_returns=mean_returns,
