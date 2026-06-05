@@ -29,4 +29,17 @@ def test_llm_agent_plays_a_full_game_and_produces_a_valid_trajectory():
     assert len(traj.actions) > 0
     # Engine determinism: the recorded (seed, actions) reconstructs to a terminal state.
     final = replay(traj)
-    assert final.done or traj.truncated
+    assert final.done and not traj.truncated   # full game terminates naturally, not at the step cap
+
+
+def test_llm_agent_traverses_shop_phases_in_a_full_run():
+    # Tiny req_scale => the single-card stub clears trivial blinds and advances antes,
+    # which forces the run through SHOP phases (you can only pass ante 1 by clearing its
+    # 3 blinds, with shops between them). We assert on the live terminal state rather than
+    # replay(traj): replay() reconstructs at the engine-default req_scale and is only
+    # faithful for default-scale runs (a known runner.py limitation, tracked separately).
+    env = BalatroEnv(reward_name="shaped", req_scale=0.001)
+    agent = LLMAgent(policy=ScriptedStubPolicy())
+    traj = run_episode(env, agent, seed=0)
+    assert traj.final_ante >= 2, "should clear ante 1 and pass through shops"
+    assert env.state.done and not traj.truncated   # terminated naturally, not at the step cap
