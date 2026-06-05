@@ -9,9 +9,9 @@ from balatro_rl.envs.actions import (
 
 def test_action_space_size():
     assert PLAY_N == 218            # C(8,1..5)
-    # 218 play + 218 discard + 40 shop(buy2 sell6 reroll1 reorder30 leave1) + 3 USE
+    # 218 play + 218 discard + 42 shop(buy4 sell6 reroll1 reorder30 leave1) + 3 USE
     #   + 218 USE_TARGET + 2 OPEN + 5 PICK + 1 SKIP + 1 VOUCHER
-    assert NUM_ACTIONS == 706
+    assert NUM_ACTIONS == 708
 
 
 def test_decode_e5_blocks_roundtrip():
@@ -27,6 +27,36 @@ def test_decode_e5_blocks_roundtrip():
         assert encode_action(v, a) == i
 
 
+def test_buy_ids_never_collide_with_sell_ids():
+    # Regression: with Overstock / Overstock Plus vouchers the engine offers up to 4 shop
+    # CARD slots, so legal_actions emits (BUY, 2)/(BUY, 3). Those must encode to ids DISJOINT
+    # from the SELL block. Before MAX_SHOP was raised to 4, encode_action(Verb.BUY, 2) aliased
+    # onto SELL joker slot 0 (id 438), so a "buy the 3rd offer" choice silently SOLD a joker.
+    buy_ids = {encode_action(Verb.BUY, i) for i in range(4)}
+    sell_ids = {encode_action(Verb.SELL, j) for j in range(6)}
+    assert buy_ids.isdisjoint(sell_ids)
+    for i in range(4):
+        assert decode(encode_action(Verb.BUY, i)) == (Verb.BUY, i)
+
+
+def test_four_offer_shop_buy_actions_are_distinct_and_legal():
+    # A voucher-raised 4-offer shop: every BUY decodes back to a BUY (not a SELL), and the
+    # legal mask marks exactly the engine-legal actions (no collision undercount).
+    import dataclasses
+    from balatro_rl.engine.shop import ShopItem, ShopKind
+    from balatro_rl.engine.jokers.base import JokerType
+    s = reset(seed=1)
+    offers = tuple(ShopItem(int(ShopKind.JOKER), int(JokerType.JOKER), 1) for _ in range(4))
+    s = dataclasses.replace(s, phase=Phase.SHOP, money=100, shop_offers=offers)
+    eng = legal_actions(s)
+    buys = [a for a in eng if a[0] == Verb.BUY]
+    assert {arg for _v, arg in buys} == {0, 1, 2, 3}
+    for verb, arg in buys:
+        assert decode(encode_action(verb, arg)) == (Verb.BUY, arg)
+    mask = legal_mask(s)
+    assert mask.sum() == len(eng)            # no collision -> exact 1:1 count
+
+
 def test_decode_play_and_discard():
     assert decode(0) == (Verb.PLAY, (0,))
     assert decode(PLAY_N) == (Verb.DISCARD, (0,))         # first discard id
@@ -36,12 +66,12 @@ def test_decode_play_and_discard():
 
 def test_decode_shop_actions():
     assert decode(SHOP_BASE) == (Verb.BUY, 0)
-    assert decode(SHOP_BASE + 1) == (Verb.BUY, 1)
-    assert decode(SHOP_BASE + 2) == (Verb.SELL, 0)         # SELL 0..5 (MAX_JOKERS=6)
-    assert decode(SHOP_BASE + 8) == (Verb.REROLL, 0)       # after buy2 + sell6
+    assert decode(SHOP_BASE + 3) == (Verb.BUY, 3)          # BUY 0..3 (MAX_SHOP=4)
+    assert decode(SHOP_BASE + 4) == (Verb.SELL, 0)         # SELL 0..5 (MAX_JOKERS=6) starts after BUY
+    assert decode(SHOP_BASE + 10) == (Verb.REROLL, 0)      # after buy4 + sell6
     assert decode(_LEAVE) == (Verb.LEAVE_SHOP, 0)
     assert decode(_LEAVE + 1) == (Verb.USE, 0)             # USE ids appended after LEAVE_SHOP
-    v, arg = decode(SHOP_BASE + 9)                          # first reorder
+    v, arg = decode(SHOP_BASE + 11)                         # first reorder (after buy4 + sell6 + reroll1)
     assert v == Verb.REORDER and isinstance(arg, tuple) and arg[0] != arg[1]
 
 

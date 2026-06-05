@@ -11,7 +11,7 @@ vector with no link to *which* cards a play selects):
   acquisition heads (E5): pack OPEN / PICK / SKIP, BUY_VOUCHER, and USE_TARGET (the targeting
                           two-step, scored for free off the SAME candidate pool as play/discard)
 
-Contract: `apply(params, obs, mask) -> (logits[B,706], value_logits[B,255])`. All 706 logits
+Contract: `apply(params, obs, mask) -> (logits[B,708], value_logits[B,255])`. All 708 logits
 are computed then `jnp.where(mask, logits, finfo.min)`. Everything is fixed-shape (static gather
 over a constant index, masked pooling, broadcast_to) so the net jits exactly twice in training
 (act@num_envs, update@mb_size). The logit assembly order is load-bearing — it matches
@@ -91,7 +91,7 @@ class ActorCritic(nn.Module):
         je = embed(obs["joker_types"]) + nn.Dense(d)(obs["joker_counter"][..., None]) + seg[1]  # [B,6,d]
         # shop slot = joker embed (if a joker offer) + consumable embed (if a consumable offer) + cost
         se = (embed(obs["shop_types"]) + cembed(obs["shop_consum"])
-              + nn.Dense(d)(obs["shop_cost"][..., None]) + seg[2])      # [B,2,d]
+              + nn.Dense(d)(obs["shop_cost"][..., None]) + seg[2])      # [B,MAX_SHOP,d]
         ce = cembed(obs["consum_types"]) + seg[3]                      # [B,MAX_CONSUM,d] owned consumables
         # pack OFFERS (shop) and revealed pack ITEMS (OPEN_PACK)
         pe = (pkembed(obs["pack_kind"]) + psembed(obs["pack_size"])

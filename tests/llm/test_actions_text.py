@@ -38,6 +38,19 @@ from balatro_rl.envs.actions import decode, legal_mask
 from balatro_rl.llm.actions_text import parse_action
 
 
+def test_build_menu_four_offer_shop_buys_decode_to_buy_not_sell():
+    # Regression for the BUY/SELL id collision: a voucher-raised 4-offer shop must produce
+    # four distinct "Buy" options whose action_ids decode to BUY (not SELL joker slots).
+    state = engine.reset(0)
+    offers = tuple(ShopItem(int(ShopKind.JOKER), int(JokerType.JOKER), 1) for _ in range(4))
+    state = dataclasses.replace(state, phase=Phase.SHOP, money=100, shop_offers=offers)
+    buy_opts = [o for o in build_menu(state).options if o.label.startswith("Buy")]
+    assert len(buy_opts) == 4
+    for o in buy_opts:
+        assert decode(o.action_id)[0].name == "BUY"      # not SELL
+    assert len({o.action_id for o in buy_opts}) == 4      # all distinct
+
+
 def test_parse_menu_choice_returns_legal_action_id():
     state = engine.reset(0)
     offer = ShopItem(kind=int(ShopKind.JOKER), type_id=int(JokerType.JOKER), cost=2)
