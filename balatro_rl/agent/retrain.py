@@ -73,6 +73,13 @@ def main():
         print("[retrain] WARNING: no GPU detected — a full run will be slow on CPU. "
               "Use --smoke for a local check, or run on a CUDA host (docs/RUNPOD.md).", flush=True)
 
+    # Live dashboard. Set BALATRO_TRACKIO_SPACE=<user/space> to host a PUBLIC (or private)
+    # HuggingFace-Spaces dashboard you can open from any browser while the pod trains — the
+    # remote-training answer (needs an HF token on the box: `huggingface-cli login` or HF_TOKEN).
+    # Unset -> a local-only Trackio db (view via `trackio show` / SSH-forward). GPU traces auto-on
+    # when a GPU is present, so the dashboard shows whether the GPU is saturated.
+    space = os.environ.get("BALATRO_TRACKIO_SPACE")
+    private = os.environ.get("BALATRO_TRACKIO_PRIVATE", "0") == "1"
     trk = None
     try:
         from .metrics_logger import TrackioLogger
@@ -80,7 +87,11 @@ def main():
                             config={"d_model": D_MODEL, "updates": cfg.num_updates,
                                     "num_envs": NUM_ENVS, "enable_bosses": True,
                                     "boss_curriculum": True, "curr_floor": cfg.curr_floor,
-                                    "device": "gpu" if on_gpu else "cpu"})
+                                    "device": "gpu" if on_gpu else "cpu"},
+                            space_id=space, private=private, auto_log_gpu=on_gpu)
+        if space:
+            print(f"[retrain] live dashboard -> HF Space '{space}' "
+                  f"({'private' if private else 'public'}); opens in a browser shortly", flush=True)
     except Exception as e:   # trackio optional; console logging still streams progress
         print(f"[retrain] trackio unavailable ({e}); console-only", flush=True)
     logger = MultiLogger(ConsoleLogger(every=5), trk)

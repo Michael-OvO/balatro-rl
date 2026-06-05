@@ -27,9 +27,34 @@ python -m balatro_rl.agent.retrain --smoke
 Expect: `JAX devices: [CudaDevice(id=0)] (GPU)`, a handful of updates with eval lines, two recorded
 replays, and `[retrain] DONE`. No crash = the obs/action/network contract is intact on the GPU.
 
-## 4. Full run
+## 4. Live dashboard (see progress from your laptop)
+The training streams metrics to **Trackio** (a wandb-style dashboard). On a remote pod you have
+three ways to watch, best first:
+
+**(a) Hosted HuggingFace Space — view from any browser, survives the pod dying (recommended).**
+```bash
+huggingface-cli login                      # or: export HF_TOKEN=hf_xxx   (one-time, on the pod)
+export BALATRO_TRACKIO_SPACE=<your-hf-user>/balatro-e5    # e.g. michael/balatro-e5
+# export BALATRO_TRACKIO_PRIVATE=1         # optional: private Space
+python -m balatro_rl.agent.retrain
+```
+Trackio deploys/syncs a dashboard to that Space and prints its URL at startup; open it anywhere.
+It shows the live curves (return, req_scale/boss_rate ramp, clear_rate, eval blinds/ante/win) **and
+GPU utilization/memory** (auto-logged on a GPU box — so you can see if the GPU is saturated or the
+CPU env-stepping is the limiter). The Space persists after the run ends.
+
+**(b) RunPod proxy port.** Expose a port when creating the pod; Trackio's local dashboard is then
+reachable at `https://<podid>-<port>.proxy.runpod.net`.
+
+**(c) SSH port-forward.** `ssh -L 7860:localhost:7860 root@<pod>` then open `http://localhost:7860`.
+
+(Without any of these, metrics still log locally — `trackio show --project balatro-retrain-e5` — and
+the console prints a progress line per update + every eval, so `tail -f retrain.log` always works.)
+
+## 5. Full run
 ```bash
 # defaults: d_model 256, 64 envs, 2000 updates, curriculum floor 0.2, boss curriculum on
+# (set BALATRO_TRACKIO_SPACE first for the live dashboard — see §4)
 nohup python -m balatro_rl.agent.retrain > retrain.log 2>&1 &
 tail -f retrain.log
 ```
@@ -43,7 +68,7 @@ BALATRO_DMODEL=384 BALATRO_NUM_ENVS=128 BALATRO_UPDATES=3000 \
 - `BALATRO_UPDATES`  PPO updates (default 2000)
 - `BALATRO_EPISODE_DIR` where params + replay JSONs are written (default `/tmp/sweep_out`)
 
-## 5. What "good" looks like
+## 6. What "good" looks like
 Watch the `eval @ N | blinds ... ante ... max ...` lines (greedy eval on the **real** deploy game:
 full req_scale, full bosses). `train/req_scale` and `train/boss_rate` should ramp 0.2 → 1.0 as the
 agent starts clearing (the boss curriculum fades bosses in with the score bar — the fix for the
@@ -51,7 +76,7 @@ plateau we saw earlier). The previous baseline plateaued around 1.5 blinds; E5 g
 acquisition tools (Planets to level hands, packs, vouchers) it was blind to, so it should climb past
 that as it learns to *build a deck*, not just play hands.
 
-## 6. Bring the results back
+## 7. Bring the results back
 `retrain_e5_params.msgpack` + `retrain_e5_seed{4,7}.episode.json` land in `BALATRO_EPISODE_DIR`.
 Copy them down (`runpodctl send` / `scp`) and load the params into `ActorCritic(action_dim=NUM_ACTIONS,
 d_model=<same D_MODEL>)`; drop the episode JSONs into the viewer's episode dir to watch the run.
