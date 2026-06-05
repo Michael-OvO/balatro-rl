@@ -60,20 +60,18 @@ class GameState:
     # Active boss on the current blind (BossEffect int; 0 = NONE / no boss). Set by
     # _advance_blind when entering the boss blind with bosses enabled; 0 on small/big
     # blinds and whenever bosses are disabled. `bosses_enabled` gates boss selection so
-    # the default game is byte-identical (the agent stays boss-blind until the retrain).
+    # the default game is byte-identical (bosses are opt-in via enable_bosses).
     boss: int = 0
     bosses_enabled: bool = False
     # Owned consumables (Tarot/Planet/Spectral) and the slot cap. Applied via the USE
-    # action (engine.step). Empty by default -> no consumables, byte-identical. The agent
-    # can't see or USE them until the Phase D obs/action widening.
+    # action (engine.step). Empty by default -> no consumables, byte-identical.
     consumables: tuple = ()      # tuple[Consumable, ...]
     consumable_slots: int = 2
     # E3 booster packs. `pack_offers` are the shop's pack slots (tuple[Pack, ...]), generated
     # alongside the card offers. When a pack is BOUGHT (Verb.OPEN), the engine enters
     # Phase.OPEN_PACK: `pack_open` holds the revealed items (tuple[PackItem, ...]) and
     # `pack_picks` the remaining picks; PICK/SKIP_PACK drain them, then phase returns to SHOP.
-    # All default empty/0 -> byte-identical for directly-constructed states; the agent is
-    # blind (legal_actions never offers Verb.OPEN) until the E5 obs/action widening.
+    # All default empty/0 -> byte-identical for directly-constructed states.
     pack_offers: tuple = ()      # tuple[Pack, ...] offered in the shop
     pack_open: tuple = ()        # tuple[PackItem, ...] revealed during OPEN_PACK
     pack_picks: int = 0          # remaining picks during OPEN_PACK
@@ -82,8 +80,7 @@ class GameState:
     # interest cap, reroll discount, shop weights) — those are DERIVED from it where used,
     # never stored separately. `voucher_offer` is the shop's single voucher slot (0 = none
     # offered; otherwise a VoucherType id). Both default empty/0 -> byte-identical for
-    # directly-constructed states; the agent is blind (legal_actions never offers
-    # Verb.BUY_VOUCHER) until the E5 obs/action widening.
+    # directly-constructed states.
     vouchers: tuple = ()         # tuple[int, ...] owned VoucherType ids
     voucher_offer: int = 0       # the shop's voucher slot (0 = none; else a VoucherType id)
     # E5 targeting two-step. A card-targeting Tarot's USE needs hand indices the flat action

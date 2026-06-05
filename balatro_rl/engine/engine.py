@@ -22,7 +22,9 @@ from .bosses import (
     is_finisher, select_boss,
 )
 from .cards import Enhancement, standard_deck
-from .consumables import Consumable, apply_consumable, consumable_needs_target, max_targets
+from .consumables import (
+    Consumable, apply_consumable, consumable_needs_target, max_targets, min_targets,
+)
 from .economy import blind_reward, interest, MONEY_PER_UNUSED_HAND
 from .hands import evaluate
 from .jokers.base import HandEvents, JokerState, NO_RULES, REGISTRY, aggregate_rules
@@ -35,7 +37,7 @@ from .shop import (
 )
 from .state import GameState, Phase
 from .vouchers import (
-    VOUCHER_COST, VoucherType, extra_card_slots, extra_consumable_slots,
+    VOUCHER_COST, VoucherType, extra_card_slots,
     extra_discards, extra_hand_size, extra_hands, extra_joker_slots, interest_cap,
     planet_weight_mult, prereq_met, reroll_discount, roll_voucher, tarot_weight_mult,
 )
@@ -61,11 +63,11 @@ class Verb(IntEnum):
     REORDER = 5
     LEAVE_SHOP = 6
     USE = 7        # use a consumable (payload = consumable index); a free action, any phase
-    # E3 booster packs (agent BLIND — never emitted by legal_actions; direct engine.step only):
+    # E3 booster packs:
     OPEN = 8       # in SHOP: buy + open pack_offers[i] -> enter OPEN_PACK
     PICK = 9       # in OPEN_PACK: take pack_open[i] (consumable/joker slot) -> decrement picks
     SKIP_PACK = 10  # in OPEN_PACK: end picking -> back to SHOP
-    # E4 vouchers (agent BLIND — never emitted by legal_actions; direct engine.step only):
+    # E4 vouchers:
     BUY_VOUCHER = 11  # in SHOP: buy the offered voucher -> apply a persistent run modifier
     # E5 targeting two-step: apply the armed (pending) targeting Tarot to the selected hand cards.
     USE_TARGET = 12   # payload = target hand indices (a subset); resolves state.pending_consumable
@@ -98,8 +100,7 @@ def make_master_deck(card_mods=None) -> tuple:
     enhanced cards into play. `card_mods` maps a canonical deck index (0..51, the
     standard_deck() order: suit-major, rank-ascending) to a dict of mod fields, e.g.
     `{0: {"enhancement": Enhancement.GLASS, "seal": Seal.GOLD}}`. Default None ->
-    the plain 52-card deck (byte-identical to the current game). NOT wired into the
-    agent/obs; the agent stays blind to mods until the Phase D retrain.
+    the plain 52-card deck (byte-identical to the current game).
     """
     deck = standard_deck()
     if card_mods:
@@ -154,10 +155,14 @@ def legal_actions(state: GameState) -> list[tuple[Verb, tuple[int, ...]]]:
     # target-subset selections (USE_TARGET). It is only ever armed in PLAYING with a non-empty
     # hand, so size-1 always exists -> the agent is never stuck. Bounded to the Tarot's reach.
     if state.pending_consumable >= 0:
-        mt = max_targets(state.consumables[state.pending_consumable])
+        con = state.consumables[state.pending_consumable]
         n = len(state.hand)
+        # Subsets sized [min_targets, max_targets]: Death needs EXACTLY 2 (a size-1 pick would
+        # waste it), so it offers only size-2; every other targeting Tarot offers 1..max. Arming
+        # only happens with n >= min_targets, so this range is always non-empty (never stuck).
+        lo, hi = min_targets(con), min(max_targets(con), n)
         return [(Verb.USE_TARGET, combo)
-                for size in range(1, min(mt, n) + 1)
+                for size in range(lo, hi + 1)
                 for combo in itertools.combinations(range(n), size)]
     # No-target consumables (Planets, no-target Tarots) USE in any phase — a free action.
     # Empty by default -> no USE actions (byte-identical until consumables are acquired).
@@ -205,12 +210,13 @@ def legal_actions(state: GameState) -> list[tuple[Verb, tuple[int, ...]]]:
                 if i != j:
                     actions.append((Verb.REORDER, (i, j)))
         return actions
-    # PLAYING. Card-targeting Tarots are now ARM-able here (hand non-empty) via a bare (USE, ci);
-    # stepping it enters the pending two-step above. No-target consumables stay in `use`.
+    # PLAYING. Card-targeting Tarots are now ARM-able here via a bare (USE, ci); stepping it enters
+    # the pending two-step above. Only offered when the hand holds enough cards to satisfy the
+    # Tarot's min_targets (so Death — exactly 2 — never arms into a stuck pending state). No-target
+    # consumables stay in `use`.
     actions: list[tuple[Verb, tuple[int, ...]]] = list(use)
-    if state.hand:
-        actions += [(Verb.USE, i) for i, c in enumerate(state.consumables)
-                    if consumable_needs_target(c)]
+    actions += [(Verb.USE, i) for i, c in enumerate(state.consumables)
+                if consumable_needs_target(c) and len(state.hand) >= min_targets(c)]
     n = len(state.hand)
     # Boss PLAY restrictions (Psychic exactly-5 / Eye no-repeat / Mouth single-type). Only
     # engaged on those boss blinds; off them `play_filter` is False and the loop is the
@@ -349,6 +355,11 @@ def _use_consumable(state: GameState, ci: int, targets=()) -> tuple[GameState, d
 
 def step(state: GameState, action: tuple[Verb, tuple[int, ...]]) -> tuple[GameState, dict]:
     assert not state.done, "step() called on a terminal state"
+    # While a targeting Tarot is armed, legal_actions returns ONLY USE_TARGET, so any other verb
+    # here means the caller ignored the mask. Reject it rather than silently leaking pending into
+    # the successor (which would desync the stored consumable index).
+    assert state.pending_consumable < 0 or action[0] == Verb.USE_TARGET, \
+        "a consumable is armed; only USE_TARGET is legal until it resolves"
     if action[0] == Verb.USE_TARGET:   # E5: apply the ARMED targeting Tarot to the selected cards
         assert state.pending_consumable >= 0, "no consumable armed for targeting"
         ci, targets = state.pending_consumable, tuple(action[1])
@@ -365,8 +376,11 @@ def step(state: GameState, action: tuple[Verb, tuple[int, ...]]) -> tuple[GameSt
             return _use_consumable(state, payload[0], payload[1:])
         ci = payload
         assert 0 <= ci < len(state.consumables), "no such consumable"
-        if consumable_needs_target(state.consumables[ci]):
-            assert state.hand, "no hand cards to target"
+        con = state.consumables[ci]
+        if consumable_needs_target(con):
+            # Arm only when the hand can satisfy the Tarot's min_targets (so the pending state
+            # below always has a legal USE_TARGET subset — never stuck; matters for Death's 2).
+            assert len(state.hand) >= min_targets(con), "not enough hand cards to target"
             return dataclasses.replace(state, pending_consumable=ci), {"verb": "use_arm", "ci": ci}
         return _use_consumable(state, ci, ())
     if state.phase == Phase.OPEN_PACK:        # E3: pick K-of-M revealed pack items

@@ -6,7 +6,6 @@ from __future__ import annotations
 
 import numpy as np
 
-from .actions import NUM_ACTIONS
 from .balatro_env import BalatroEnv
 
 
@@ -16,12 +15,10 @@ def _stack(obs_list: list[dict]) -> dict:
 
 class SyncVectorEnv:
     def __init__(self, num_envs: int, reward_name: str = "shaped", base_seed: int = 0,
-                 req_scale: float = 1.0, enable_bosses: bool = False,
-                 enhance_rate: float = 0.0, grant_planets: int = 0, boss_rate: float = 1.0):
+                 req_scale: float = 1.0, enable_bosses: bool = False, boss_rate: float = 1.0):
         self.num_envs = num_envs
         self.base_seed = base_seed
-        self._envs = [BalatroEnv(reward_name, req_scale, enable_bosses, enhance_rate,
-                                 grant_planets, boss_rate)
+        self._envs = [BalatroEnv(reward_name, req_scale, enable_bosses, boss_rate)
                       for _ in range(num_envs)]
         self._next_seed = base_seed
         self._obs = None

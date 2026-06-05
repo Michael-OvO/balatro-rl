@@ -26,7 +26,7 @@ from ..engine.state import GameState
 from ..engine.vouchers import VoucherType
 from .actions import MAX_CONSUM, MAX_HAND, MAX_JOKERS, MAX_PACK, MAX_PACK_ITEMS, MAX_SHOP
 
-# Per-card features (Phase D widening): rank(13) + suit(4) + enhancement(9) + edition(4)
+# Per-card features: rank(13) + suit(4) + enhancement(9) + edition(4)
 # + seal(5) + is_debuffed(1) + is_face_down(1). is_face_down is always 0 for now (the
 # face-down bosses are deferred) but reserved so the obs schema is stable across the retrain.
 _N_ENH, _N_EDITION, _N_SEAL = len(Enhancement), len(Edition), len(Seal)   # 9, 4, 5
