@@ -7,13 +7,17 @@ under the E5 boss-rate curriculum (bosses fade in with the score bar).
 
 Config is env-overridable so the same entrypoint sizes up on a RunPod GPU and down for a local
 smoke (see docs/RUNPOD.md):
-    BALATRO_DMODEL   network width      (default 256, smoke 64)
-    BALATRO_NUM_ENVS parallel envs      (default 64,  smoke 8)
-    BALATRO_UPDATES  PPO updates        (default 2000, smoke 5)
-    BALATRO_EPISODE_DIR  output dir     (default /tmp/sweep_out)
+    BALATRO_DMODEL          network width   (default 256, smoke 64)
+    BALATRO_NUM_ENVS        parallel envs   (default 64,  smoke 8)
+    BALATRO_UPDATES         PPO updates     (default 2000, smoke 5)
+    BALATRO_EPISODE_DIR     output dir      (default /tmp/sweep_out)
+    BALATRO_CHECKPOINT_EVERY save params every N updates (default 50; 0 = off) — so a multi-hour
+                            run survives a late crash. Latest -> <OUT>/retrain_e5_ckpt.msgpack.
+    BALATRO_RESUME          path to a .msgpack to WARM-START from (resume a crashed run)
 
-89% of the wall-clock is the PPO backward pass (GPU-helpable); the Python env stepping is ~7%
-and stays on CPU. On a single modern GPU expect roughly 5-8x over this Mac's CPU.
+The bottleneck is the CPU env-stepping (Python), not the GPU — a 4.7M-param backward finishes in
+ms on any modern GPU, so the GPU tier barely matters and throughput scales with num_envs + vCPUs.
+To fill a longer time budget, raise BALATRO_UPDATES (more training), not the GPU size.
 """
 from __future__ import annotations
 
@@ -40,6 +44,8 @@ D_MODEL = int(os.environ.get("BALATRO_DMODEL", 64 if SMOKE else 256))
 NUM_ENVS = int(os.environ.get("BALATRO_NUM_ENVS", 8 if SMOKE else 64))
 NUM_UPDATES = int(os.environ.get("BALATRO_UPDATES", 5 if SMOKE else 2000))
 NUM_MB = 2 if SMOKE else 8
+CHECKPOINT_EVERY = int(os.environ.get("BALATRO_CHECKPOINT_EVERY", 2 if SMOKE else 50))
+RESUME = os.environ.get("BALATRO_RESUME")    # path to a .msgpack to warm-start from (resume)
 
 
 def _ent(u: int) -> float:
@@ -91,13 +97,34 @@ def main():
         print(f"[retrain] trackio unavailable ({e}); console-only", flush=True)
     logger = MultiLogger(ConsoleLogger(every=5), trk)
 
+    import flax.serialization
+    ckpt_path = os.path.join(OUT, "retrain_e5_ckpt.msgpack")
+
+    def _checkpoint(update_idx: int, params):
+        """Periodic checkpoint so a long run survives a late crash; always overwrites the latest."""
+        if CHECKPOINT_EVERY and update_idx > 0 and update_idx % CHECKPOINT_EVERY == 0:
+            with open(ckpt_path, "wb") as f:
+                f.write(flax.serialization.to_bytes(params))
+            print(f"[retrain] checkpoint @ update {update_idx} -> {ckpt_path}", flush=True)
+
+    init_params = None
+    if RESUME:                                 # resume a crashed run: load into a shape-matched target
+        net0 = ActorCritic(action_dim=NUM_ACTIONS, d_model=D_MODEL)
+        import jax.numpy as jnp
+        from .spec import dummy_obs
+        target = net0.init(jax.random.PRNGKey(0), {k: jnp.asarray(v) for k, v in dummy_obs(1).items()},
+                           jnp.ones((1, NUM_ACTIONS), bool))
+        with open(RESUME, "rb") as f:
+            init_params = flax.serialization.from_bytes(target, f.read())
+        print(f"[retrain] resuming (warm-start) from {RESUME}", flush=True)
+
     t0 = time.time()
     print(f"[retrain] start: {cfg.num_updates} updates, d_model={D_MODEL}, num_envs={NUM_ENVS}, "
-          f"full acquisition game + boss curriculum (floor {cfg.curr_floor})", flush=True)
-    result = train(cfg, logger=logger)
+          f"full acquisition game + boss curriculum (floor {cfg.curr_floor}), "
+          f"checkpoint every {CHECKPOINT_EVERY or 'off'}", flush=True)
+    result = train(cfg, logger=logger, init_params=init_params, on_update=_checkpoint)
     print(f"[retrain] training done in {(time.time() - t0) / 60:.1f} min", flush=True)
 
-    import flax.serialization
     ppath = os.path.join(OUT, "retrain_e5_params.msgpack")
     with open(ppath, "wb") as f:
         f.write(flax.serialization.to_bytes(result.params))
