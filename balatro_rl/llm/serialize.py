@@ -9,7 +9,7 @@ from __future__ import annotations
 from ..engine import descriptions
 from ..engine.bosses import BossEffect
 from ..engine.cards import Edition, Enhancement, Seal, card_str
-from ..engine.consumables import ConsumableKind, PlanetType, TarotType
+from ..engine.consumables import ConsumableKind, PlanetType, TarotType, max_targets
 from ..engine.jokers.base import JokerType
 from ..engine.shop import SHOP_TO_CONSUMABLE_KIND, ShopKind
 from ..engine.state import Phase
@@ -137,8 +137,20 @@ def _vouchers_block(state) -> str:
     return f"Owned vouchers: {names}"
 
 
+def _armed_block(state) -> str:
+    """A card-targeting Tarot is ARMED (the USE two-step): the engine now allows ONLY
+    USE_TARGET, so spell out the consumable, its effect, and the target-count bound."""
+    con = state.consumables[state.pending_consumable]
+    n = max_targets(con)
+    return (f"ARMED: {consumable_name(con)} ({descriptions.consumable_desc(con.kind, con.type_id)}) "
+            f"— the ONLY legal move is to target 1 to {n} card(s) from your hand to apply it "
+            f'(reply {{"action": "target", "cards": [hand indices]}}).')
+
+
 def serialize_state(state) -> str:
     blocks = [_header(state), _hand_block(state)]
+    if state.pending_consumable >= 0:
+        blocks.append(_armed_block(state))
     if state.jokers:
         blocks.append(_jokers_block(state))
     if state.consumables:
