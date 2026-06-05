@@ -37,7 +37,8 @@ class ExperimentConfig:
     req_scale_start: float = 0.1        # curriculum: trivial blinds first -> reward variance
     req_scale_end: float = 1.0
     # --- trainer ---
-    train_batch_size: int = 16          # parallel env episodes per step
+    train_batch_size: int = 16          # task-groups per step (x group_size rollouts each)
+    val_batch_size: int = 8             # task-groups for validation (group_n=1)
     total_epochs: int = 150
     save_freq: int = 20
     project_name: str = "balatro-e6-m2"
@@ -61,6 +62,7 @@ class ExperimentConfig:
             f"actor_rollout_ref.rollout.gpu_memory_utilization={self.gpu_memory_utilization}",
             f"+data.apply_chat_template_kwargs.enable_thinking={self.enable_thinking}",
             f"data.train_batch_size={self.train_batch_size}",
+            f"data.val_batch_size={self.val_batch_size}",
             f"data.max_prompt_length={self.max_prompt_length}",
             f"data.max_response_length={self.max_response_length}",
             "data.return_raw_chat=True",
