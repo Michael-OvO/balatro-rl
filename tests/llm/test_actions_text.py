@@ -91,3 +91,29 @@ def test_parse_rejects_legal_shape_but_illegal_action():
     res = parse_action('{"action": "play", "cards": [0]}', state)
     assert res.action_id is None
     assert res.error is not None
+
+
+def test_parse_action_handles_prose_braces_before_json():
+    # The system prompt invites pre-JSON reasoning; stray braces in that prose must not
+    # break extraction. The last balanced {...} that parses to a dict is the action object.
+    state = engine.reset(0)                              # PLAYING
+    reply = 'I will keep the pair {7,7} and play: {"action": "play", "cards": [0]}'
+    res = parse_action(reply, state)
+    assert res.error is None
+    verb, arg = decode(res.action_id)
+    assert verb.name == "PLAY" and arg == (0,)
+
+
+def test_parse_action_uses_passed_menu_and_mask():
+    # parse_action accepts a prebuilt menu+mask (the act() fast path) and yields the same
+    # result as deriving them from state.
+    state = engine.reset(0)
+    offer = ShopItem(int(ShopKind.JOKER), int(JokerType.JOKER), 2)
+    state = dataclasses.replace(state, phase=Phase.SHOP, money=10, shop_offers=(offer,))
+    menu = build_menu(state)
+    mask = legal_mask(state)
+    leave = next(o for o in menu.options if "Leave" in o.label)
+    via_args = parse_action(f'{{"choice": {leave.index}}}', state, menu=menu, mask=mask)
+    via_state = parse_action(f'{{"choice": {leave.index}}}', state)
+    assert via_args.action_id == via_state.action_id == leave.action_id
+    assert via_args.error is None

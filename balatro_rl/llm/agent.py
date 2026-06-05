@@ -36,12 +36,15 @@ class LLMAgent:
                                         window_turns=self._ctx._window)
 
     def act(self, state, mask) -> int:
-        observation = serialize_state(state) + "\n\n" + render_menu(build_menu(state))
+        # Build the menu once and reuse the caller's mask (run_episode passes legal_mask(state));
+        # parse_action then validates against these instead of recomputing legal_actions each retry.
+        menu = build_menu(state)
+        observation = serialize_state(state) + "\n\n" + render_menu(menu)
         messages = self._ctx.render(observation)
         reply, chosen = "", None
         for _ in range(self._max_retries + 1):
             reply = self._policy.generate(messages)
-            res = parse_action(reply, state)
+            res = parse_action(reply, state, menu=menu, mask=mask)
             if res.error is None:
                 chosen = res.action_id
                 break

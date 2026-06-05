@@ -106,31 +106,51 @@ class ParseResult:
 
 
 def _extract_json(reply: str):
-    start = reply.find("{")
-    end = reply.rfind("}")
-    if start == -1 or end == -1 or end < start:
-        return None
-    try:
-        obj = json.loads(reply[start:end + 1])
-    except json.JSONDecodeError:
-        return None
-    return obj if isinstance(obj, dict) else None
+    """Find the model's action object in a free-text reply. Scans for every balanced
+    {...} span and returns the LAST one that parses to a dict. Robust to stray braces
+    in the model's pre-JSON reasoning (the system prompt invites it to "think briefly"
+    first), which a naive first-'{'..last-'}' span would mis-capture into invalid JSON."""
+    spans: list[str] = []
+    depth = start = 0
+    started = False
+    for i, ch in enumerate(reply):
+        if ch == "{":
+            if not started:
+                start, started = i, True
+            depth += 1
+        elif ch == "}" and started:
+            depth -= 1
+            if depth == 0:
+                spans.append(reply[start:i + 1])
+                started = False
+    for span in reversed(spans):
+        try:
+            obj = json.loads(span)
+        except json.JSONDecodeError:
+            continue
+        if isinstance(obj, dict):
+            return obj
+    return None
 
 
 _CARD_VERB = {"play": Verb.PLAY, "discard": Verb.DISCARD, "target": Verb.USE_TARGET}
 
 
-def parse_action(reply: str, state) -> ParseResult:
+def parse_action(reply: str, state, menu: "Menu | None" = None, mask=None) -> ParseResult:
+    """Parse an LLM reply into a validated flat action id. `menu` and `mask` may be passed
+    in to avoid recomputing build_menu(state)/legal_mask(state) when the caller already has
+    them (act() does); when omitted they are derived from `state` (back-compatible)."""
     obj = _extract_json(reply)
     if obj is None:
         return ParseResult(error="no JSON object found in reply")
-    mask = legal_mask(state)
+    if mask is None:
+        mask = legal_mask(state)
     if "choice" in obj:
         try:
             idx = int(obj["choice"])
         except (TypeError, ValueError):
             return ParseResult(error=f"choice is not an int: {obj['choice']!r}")
-        options = build_menu(state).options
+        options = (menu if menu is not None else build_menu(state)).options
         if not 0 <= idx < len(options):
             return ParseResult(error=f"choice {idx} out of range 0..{len(options) - 1}")
         aid = options[idx].action_id
