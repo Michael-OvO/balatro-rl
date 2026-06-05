@@ -14,9 +14,11 @@ from ..agent.value_head import value_decode
 from ..engine import engine
 from ..engine.bosses import BossEffect
 from ..engine.cards import card_str
-from ..engine.descriptions import boss_desc, consumable_desc, joker_desc, pack_desc, voucher_desc
+from ..engine.descriptions import (
+    boss_desc, boss_name, consumable_desc, consumable_name, joker_desc, joker_name,
+    pack_desc, voucher_desc, voucher_name,
+)
 from ..engine.engine import Verb, explain_play
-from ..engine.jokers.base import JokerType
 from ..engine.shop import sell_value
 from ..engine.state import GameState, Phase
 from ..envs.actions import decode
@@ -33,7 +35,7 @@ def _card_d(c) -> dict:
 
 
 def _joker_d(j) -> dict:
-    return {"type": int(j.type), "name": JokerType(j.type).name,
+    return {"type": int(j.type), "name": joker_name(j.type),
             "desc": joker_desc(j.type),            # human-readable effect for the viewer
             "counter": float(j.counter), "edition": int(j.edition),
             "sell": sell_value(j.type, j.sell_bonus)}
@@ -45,33 +47,24 @@ def _consum_d(con) -> dict:
 
 
 def _consum_name(con) -> str:
-    from ..engine.consumables import ConsumableKind, PlanetType, TarotType
-    if con.kind == ConsumableKind.PLANET:
-        return PlanetType(con.type_id).name.title().replace("_", " ")
-    if con.kind == ConsumableKind.TAROT:
-        return TarotType(con.type_id).name.title().replace("_", " ")
-    return f"{ConsumableKind(con.kind).name.title()} {con.type_id}"
+    return consumable_name(con.kind, con.type_id)
 
 
 def _boss_d(state) -> dict:
     """Active boss: name + effect text (empty when no boss on this blind)."""
     if not state.boss:
         return {}
-    b = BossEffect(state.boss)
-    return {"id": int(b), "name": b.name.replace("_", " ").title(), "desc": boss_desc(b)}
+    return {"id": int(state.boss), "name": boss_name(state.boss), "desc": boss_desc(state.boss)}
 
 
 def _offer_name(o) -> str:
-    """Readable name for a shop offer (joker via JokerType, planet via PlanetType,
-    tarot via TarotType)."""
-    from ..engine.consumables import PlanetType, TarotType
-    from ..engine.shop import ShopKind
+    """Readable name for a shop offer (joker / planet / tarot), via the canonical
+    name helpers in engine.descriptions."""
+    from ..engine.shop import SHOP_TO_CONSUMABLE_KIND, ShopKind
     if o.kind == ShopKind.JOKER:
-        return JokerType(o.type_id).name
-    if o.kind == ShopKind.PLANET:
-        return PlanetType(o.type_id).name.title().replace("_", " ")
-    if o.kind == ShopKind.TAROT:
-        return TarotType(o.type_id).name.title().replace("_", " ")
+        return joker_name(o.type_id)
+    if o.kind in (ShopKind.PLANET, ShopKind.TAROT):
+        return consumable_name(SHOP_TO_CONSUMABLE_KIND[o.kind], o.type_id)
     return f"{ShopKind(o.kind).name.title()} {o.type_id}"
 
 
@@ -94,15 +87,14 @@ def _pack_item_d(it) -> dict:
     from ..engine.packs import PackItemKind
     if it.kind == PackItemKind.JOKER:
         return {"kind": int(it.kind), "type_id": int(it.payload.type),
-                "name": JokerType(it.payload.type).name, "desc": joker_desc(it.payload.type)}
+                "name": joker_name(it.payload.type), "desc": joker_desc(it.payload.type)}
     con = it.payload
     return {"kind": int(it.kind), "type_id": int(con.type_id),
             "name": _consum_name(con), "desc": consumable_desc(con.kind, con.type_id)}
 
 
 def _voucher_name(vid) -> str:
-    from ..engine.vouchers import VoucherType
-    return VoucherType(int(vid)).name.title().replace("_", " ")
+    return voucher_name(int(vid))
 
 
 def _voucher_d(vid) -> dict:
@@ -136,7 +128,7 @@ def action_label(action_id: int) -> str:
 
 
 def render_board(state: GameState) -> str:
-    jokers = " | ".join(JokerType(j.type).name for j in state.jokers) or "—"
+    jokers = " | ".join(joker_name(j.type) for j in state.jokers) or "—"
     hand = " ".join(card_str(c) for c in state.hand) or "—"
     lines = [
         f"Ante {state.ante}  blind {state.blind_index}  [{_PHASE.get(int(state.phase), state.phase)}]",

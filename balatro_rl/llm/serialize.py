@@ -7,44 +7,33 @@ actions_text.py so the menu and the observation label entities identically (DRY)
 from __future__ import annotations
 
 from ..engine import descriptions
-from ..engine.bosses import BossEffect
 from ..engine.cards import Edition, Enhancement, Seal, card_str
-from ..engine.consumables import ConsumableKind, PlanetType, TarotType, max_targets
-from ..engine.jokers.base import JokerType
+from ..engine.consumables import max_targets
 from ..engine.shop import SHOP_TO_CONSUMABLE_KIND, ShopKind
 from ..engine.state import Phase
-from ..engine.vouchers import VoucherType
 
 _BLIND_NAME = {0: "Small", 1: "Big", 2: "Boss"}
 
-
-def _pretty(name: str) -> str:
-    return name.replace("_", " ").title()
+# Title-case helper + entity display names live canonically in engine.descriptions (the single
+# source of truth, shared with the replay viewer). serialize keeps thin object-taking wrappers
+# so actions_text.py's `from .serialize import ...` stays stable.
+_pretty = descriptions.pretty
 
 
 # --- shared name helpers (also imported by actions_text.py) ---
 
 def joker_name(js) -> str:
-    return _pretty(JokerType(int(js.type)).name)
-
-
-def _consumable_name_by_kind(kind: int, type_id: int) -> str:
-    k = int(kind)
-    if k == int(ConsumableKind.PLANET):
-        return _pretty(PlanetType(int(type_id)).name)
-    if k == int(ConsumableKind.TAROT):
-        return _pretty(TarotType(int(type_id)).name)
-    return "Spectral"
+    return descriptions.joker_name(js.type)
 
 
 def consumable_name(con) -> str:
-    return _consumable_name_by_kind(con.kind, con.type_id)
+    return descriptions.consumable_name(con.kind, con.type_id)
 
 
 def shop_offer_name(offer) -> str:
     if int(offer.kind) == int(ShopKind.JOKER):
-        return _pretty(JokerType(int(offer.type_id)).name)
-    return _consumable_name_by_kind(SHOP_TO_CONSUMABLE_KIND[offer.kind], offer.type_id)
+        return descriptions.joker_name(offer.type_id)
+    return descriptions.consumable_name(SHOP_TO_CONSUMABLE_KIND[offer.kind], offer.type_id)
 
 
 def pack_name(pack) -> str:
@@ -52,7 +41,7 @@ def pack_name(pack) -> str:
 
 
 def voucher_name(vid) -> str:
-    return _pretty(VoucherType(int(vid)).name)
+    return descriptions.voucher_name(vid)
 
 
 # --- blocks ---
@@ -66,7 +55,7 @@ def _card_mods(c) -> str:
 def _header(state) -> str:
     boss = ""
     if state.boss:
-        boss = f" | BOSS: {_pretty(BossEffect(state.boss).name)} ({descriptions.boss_desc(state.boss)})"
+        boss = f" | BOSS: {descriptions.boss_name(state.boss)} ({descriptions.boss_desc(state.boss)})"
     blind = _BLIND_NAME.get(state.blind_index, str(state.blind_index))
     return (
         f"Phase: {_pretty(Phase(state.phase).name)} | Ante {state.ante}, {blind} blind{boss}\n"
