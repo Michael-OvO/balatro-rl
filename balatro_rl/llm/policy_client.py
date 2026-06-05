@@ -23,10 +23,15 @@ class FrozenEndpointPolicy:
     from base_url/api_key. Used for the M1 frozen baseline and for eval."""
 
     def __init__(self, model: str, base_url: str | None = None, api_key: str = "EMPTY",
-                 temperature: float = 0.7, max_tokens: int = 512, client=None):
+                 temperature: float = 0.7, max_tokens: int = 512, client=None,
+                 extra_body: dict | None = None):
         self._model = model
         self._temperature = temperature
         self._max_tokens = max_tokens
+        # Endpoint-specific passthrough (e.g. vLLM's chat_template_kwargs). Left None by default
+        # so the client stays compatible with any OpenAI endpoint, incl. api.openai.com which
+        # rejects unknown body params. See no_think_extra_body() for the common Qwen3 case.
+        self._extra_body = extra_body
         if client is not None:
             self._client = client
         else:
@@ -34,8 +39,18 @@ class FrozenEndpointPolicy:
             self._client = OpenAI(base_url=base_url, api_key=api_key)
 
     def generate(self, messages: list[dict]) -> str:
-        resp = self._client.chat.completions.create(
-            model=self._model, messages=messages,
-            temperature=self._temperature, max_tokens=self._max_tokens,
-        )
+        kwargs = dict(model=self._model, messages=messages,
+                      temperature=self._temperature, max_tokens=self._max_tokens)
+        if self._extra_body is not None:
+            kwargs["extra_body"] = self._extra_body
+        resp = self._client.chat.completions.create(**kwargs)
         return resp.choices[0].message.content or ""
+
+
+def no_think_extra_body() -> dict:
+    """`extra_body` that disables Qwen3-style <think> blocks via the chat template, so the
+    brief-reasoning + JSON action fits inside max_tokens (a <think> block would otherwise eat
+    the whole budget before the action is emitted). Only meaningful on a vLLM/SGLang endpoint
+    serving a model whose chat template defines `enable_thinking`; harmless-to-ignore there,
+    but do NOT send it to api.openai.com (it rejects unknown params)."""
+    return {"chat_template_kwargs": {"enable_thinking": False}}

@@ -11,7 +11,7 @@ import dataclasses
 from ..envs.balatro_env import BalatroEnv
 from ..envs.runner import Trajectory, run_episode
 from .agent import LLMAgent
-from .policy_client import FrozenEndpointPolicy
+from .policy_client import FrozenEndpointPolicy, no_think_extra_body
 
 
 @dataclasses.dataclass
@@ -54,9 +54,14 @@ def main() -> None:
     ap.add_argument("--seeds", default="0-31")
     ap.add_argument("--reward-name", default="shaped")
     ap.add_argument("--temperature", type=float, default=0.7)
+    ap.add_argument("--no-thinking", action="store_true",
+                    help="Disable Qwen3-style <think> blocks (vLLM/SGLang only; see "
+                         "no_think_extra_body). Lets the brief-reasoning + JSON action fit in "
+                         "max_tokens. Do NOT use against api.openai.com.")
     args = ap.parse_args()
     policy = FrozenEndpointPolicy(model=args.model, base_url=args.base_url,
-                                  api_key=args.api_key, temperature=args.temperature)
+                                  api_key=args.api_key, temperature=args.temperature,
+                                  extra_body=no_think_extra_body() if args.no_thinking else None)
     report = run_baseline(policy, seeds=_parse_seeds(args.seeds), reward_name=args.reward_name)
     print(f"games={report.games} win_rate={report.win_rate:.3f} "
           f"mean_final_ante={report.mean_final_ante:.2f}")

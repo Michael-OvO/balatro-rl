@@ -47,3 +47,15 @@ def test_frozen_policy_returns_reply_text_and_passes_messages():
     assert client.chat.completions.seen["model"] == "test-model"
     assert client.chat.completions.seen["messages"] == msgs
     assert client.chat.completions.seen["temperature"] == 0.7
+    # No extra_body by default -> stays compatible with strict OpenAI endpoints.
+    assert "extra_body" not in client.chat.completions.seen
+
+
+def test_frozen_policy_forwards_extra_body_when_set():
+    from balatro_rl.llm.policy_client import no_think_extra_body
+    client = _FakeClient('{"choice": 0}')
+    policy = FrozenEndpointPolicy(model="m", client=client,
+                                  extra_body=no_think_extra_body())
+    policy.generate([{"role": "user", "content": "go"}])
+    assert client.chat.completions.seen["extra_body"] == {
+        "chat_template_kwargs": {"enable_thinking": False}}
