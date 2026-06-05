@@ -32,3 +32,39 @@ def test_render_menu_includes_indices_and_card_instructions():
     state = engine.reset(0)
     text = render_menu(build_menu(state))
     assert "play" in text.lower() and "cards" in text.lower()
+
+
+from balatro_rl.envs.actions import decode, legal_mask
+from balatro_rl.llm.actions_text import parse_action
+
+
+def test_parse_menu_choice_returns_legal_action_id():
+    state = engine.reset(0)
+    offer = ShopItem(kind=int(ShopKind.JOKER), type_id=int(JokerType.JOKER), cost=2)
+    state = dataclasses.replace(state, phase=Phase.SHOP, money=10, shop_offers=(offer,))
+    menu = build_menu(state)
+    leave = next(o for o in menu.options if "Leave" in o.label)
+    res = parse_action(f'{{"choice": {leave.index}}}', state)
+    assert res.error is None
+    assert res.action_id == leave.action_id
+    assert legal_mask(state)[res.action_id]
+
+
+def test_parse_play_cards_returns_legal_play_id():
+    state = engine.reset(0)                              # PLAYING, hands_left > 0
+    res = parse_action('{"action": "play", "cards": [0]}', state)
+    assert res.error is None
+    verb, arg = decode(res.action_id)
+    assert verb.name == "PLAY" and arg == (0,)
+
+
+def test_parse_rejects_illegal_choice_index():
+    state = engine.reset(0)
+    res = parse_action('{"choice": 999}', state)
+    assert res.error is not None and res.action_id is None
+
+
+def test_parse_rejects_unparseable_reply():
+    state = engine.reset(0)
+    res = parse_action("I think I will play the kings.", state)
+    assert res.error is not None
