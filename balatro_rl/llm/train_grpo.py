@@ -13,29 +13,23 @@ runs the training command; it does not perform that registration.
 from __future__ import annotations
 
 import argparse
-import os
 import shlex
 
 from .config import ExperimentConfig
 
-# verl-agent's training entrypoint module (verify against the installed version; the GRPO/GiGPO
-# recipes live under verl-agent's trainer — see docs/RUNPOD_M2.md).
+# verl-agent's training entrypoint. Launch is BARE overrides on its default ppo_trainer config
+# (validated on the pod 2026-06-06) — NOT a custom --config-name; the base config already carries
+# the env/gigpo/algorithm sections. See scripts/balatro_grpo.sh + docs/RUNPOD_M2.md.
 VERL_AGENT_MAIN = "verl.trainer.main_ppo"
-# configs/ lives at the repo root (this file is balatro_rl/llm/train_grpo.py).
-CONFIG_DIR = os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))),
-                          "configs")
-CONFIG_NAME = "balatro_grpo"
+# vLLM attention backend: flash_attn is installed on the pod, xformers is not.
+VLLM_ATTENTION_BACKEND = "FLASH_ATTN"
 
 
-def build_command(cfg: ExperimentConfig, config_dir: str = CONFIG_DIR,
-                  config_name: str = CONFIG_NAME) -> list[str]:
-    """The full argv for launching verl-agent GRPO. Loads configs/balatro_grpo.yaml as the BASE
-    (so YAML-only settings like use_invalid_action_penalty / gigpo.step_advantage_w actually
-    apply) and layers this config's overrides on top — one launch path, not two divergent ones.
-    The exact Hydra flag form may need adjusting to the installed verl-agent (see docs/RUNPOD_M2.md)."""
-    return ["python", "-m", VERL_AGENT_MAIN,
-            f"--config-path={config_dir}", f"--config-name={config_name}",
-            *cfg.to_overrides()]
+def build_command(cfg: ExperimentConfig) -> list[str]:
+    """argv for `python -m verl.trainer.main_ppo <overrides>` (bare overrides on verl's default
+    ppo_trainer config). Set VLLM_ATTENTION_BACKEND=FLASH_ATTN in the environment when launching
+    (main() does this); scripts/balatro_grpo.sh is the canonical, validated launcher."""
+    return ["python", "-m", VERL_AGENT_MAIN, *cfg.to_overrides()]
 
 
 def _cfg_from_args(args) -> ExperimentConfig:
@@ -63,10 +57,13 @@ def main() -> None:
     args = ap.parse_args()
 
     cmd = build_command(_cfg_from_args(args))
+    print(f"VLLM_ATTENTION_BACKEND={VLLM_ATTENTION_BACKEND} \\")
     print(" ".join(shlex.quote(c) for c in cmd))
     if args.launch:
+        import os
         import subprocess
-        raise SystemExit(subprocess.call(cmd))
+        env = {**os.environ, "VLLM_ATTENTION_BACKEND": VLLM_ATTENTION_BACKEND}
+        raise SystemExit(subprocess.call(cmd, env=env))
 
 
 if __name__ == "__main__":
