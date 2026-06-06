@@ -7,9 +7,12 @@ under the E5 boss-rate curriculum (bosses fade in with the score bar).
 
 Config is env-overridable so the same entrypoint sizes up on a RunPod GPU and down for a local
 smoke (see docs/RUNPOD.md):
-    BALATRO_DMODEL          network width   (default 256, smoke 64)
+    BALATRO_DMODEL          network width   (default 256, smoke 64) — must match a resumed ckpt
     BALATRO_NUM_ENVS        parallel envs   (default 64,  smoke 8)
     BALATRO_UPDATES         PPO updates     (default 2000, smoke 5)
+    BALATRO_SEED            base RNG seed   (default 0)   — vary across a parallel sweep
+    BALATRO_LR              Adam LR         (default 3e-4)
+    BALATRO_CURR_FLOOR      curriculum req_scale floor (default 0.2)
     BALATRO_EPISODE_DIR     output dir      (default /tmp/sweep_out)
     BALATRO_CHECKPOINT_EVERY save params every N updates (default 50; 0 = off) — so a multi-hour
                             run survives a late crash. Latest -> <OUT>/retrain_e5_ckpt.msgpack.
@@ -61,11 +64,16 @@ def _ent(u: int) -> float:
 
 
 def build_config() -> TrainConfig:
+    # Swept knobs read at call time (testable; vary across a parallel sweep — scripts/ppo_sweep.sh).
+    # DMODEL is intentionally NOT swept: a warm-started run must shape-match the resumed checkpoint.
+    seed = int(os.environ.get("BALATRO_SEED", 0))
+    lr = float(os.environ.get("BALATRO_LR", 3e-4))
+    curr_floor = float(os.environ.get("BALATRO_CURR_FLOOR", 0.2))
     return TrainConfig(
         num_updates=NUM_UPDATES, num_envs=NUM_ENVS, num_steps=64, d_model=D_MODEL,
-        num_minibatches=NUM_MB, update_epochs=4, lr=3e-4,
-        reward_name="shaped", seed=0, ent_coef=_ent,
-        curr_floor=0.2, ramp_clear_rate=0.7, ramp_step=0.05, ramp_window=20,
+        num_minibatches=NUM_MB, update_epochs=4, lr=lr,
+        reward_name="shaped", seed=seed, ent_coef=_ent,
+        curr_floor=curr_floor, ramp_clear_rate=0.7, ramp_step=0.05, ramp_window=20,
         enable_bosses=True, boss_curriculum=True,          # E5: bosses fade in with the score bar
         eval_interval=(2 if SMOKE else 50), eval_seeds=(0, 1, 2, 3),
         early_stop_patience=EARLY_STOP, early_stop_metric="eval/mean_blinds_cleared",
