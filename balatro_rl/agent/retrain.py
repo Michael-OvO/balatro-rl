@@ -100,7 +100,8 @@ def main():
     trk = None
     try:
         from .metrics_logger import TrackioLogger
-        trk = TrackioLogger(project="balatro-retrain-e5", name="e5-smoke" if SMOKE else "e5-full",
+        run_name = os.environ.get("BALATRO_RUN_NAME", "e5-smoke" if SMOKE else "e5-full")
+        trk = TrackioLogger(project="balatro-retrain-e5", name=run_name,
                             config={"d_model": D_MODEL, "updates": cfg.num_updates,
                                     "num_envs": NUM_ENVS, "enable_bosses": True,
                                     "boss_curriculum": True, "curr_floor": cfg.curr_floor,

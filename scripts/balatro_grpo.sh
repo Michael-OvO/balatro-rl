@@ -27,6 +27,9 @@ REQ_START=${REQ_START:-0.05}                  # curriculum floor (low -> reward 
 EPOCHS=${EPOCHS:-1}
 GPUS=${GPUS:-1}
 DATA=${DATA:-$HOME/data/balatro}
+# Live dashboard (opt-in): LOGGER='[console,wandb]' + WANDB_API_KEY in env -> verl streams reward /
+# success_rate / GPU traces to Weights & Biases (project/experiment set below). Default: console.
+LOGGER=${LOGGER:-'[console]'}
 
 cd ~/verl-agent
 python3 -m verl.trainer.main_ppo \
@@ -80,7 +83,7 @@ python3 -m verl.trainer.main_ppo \
   +env.balatro.req_scale_start=$REQ_START \
   +env.balatro.req_scale_end=1.0 \
   trainer.critic_warmup=0 \
-  trainer.logger=[console] \
+  trainer.logger="$LOGGER" \
   trainer.project_name=balatro_e6_m2 \
   trainer.experiment_name=gigpo_lora \
   trainer.n_gpus_per_node=$GPUS \
