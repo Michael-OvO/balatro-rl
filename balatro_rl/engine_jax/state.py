@@ -40,6 +40,7 @@ class CoreState(NamedTuple):
     hands_left:   jnp.ndarray       # int32[]   hands remaining this blind
     discards_left: jnp.ndarray      # int32[]   discards remaining this blind
     hand_size:    jnp.ndarray       # int32[]   current draw-up-to size
+    required_table: jnp.ndarray     # int32[9,3] required[ante, blind_index]; ante 1..8, row 0 unused
 
     # -- Economy ---------------------------------------------------------------
     money: jnp.ndarray              # int32[]   current dollars
@@ -80,6 +81,7 @@ def zeros_state() -> CoreState:
         hands_left=jnp.zeros((), dtype=jnp.int32),
         discards_left=jnp.zeros((), dtype=jnp.int32),
         hand_size=jnp.zeros((), dtype=jnp.int32),
+        required_table=jnp.zeros((9, 3), dtype=jnp.int32),
 
         money=jnp.zeros((), dtype=jnp.int32),
 

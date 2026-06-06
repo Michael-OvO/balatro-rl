@@ -32,6 +32,9 @@ NUM_ACTIONS: int = 708  # flat action-space size
 HANDS_PER_BLIND: int = 4
 DISCARDS_PER_BLIND: int = 3
 
+# Highest ante; clearing the boss (blind_index 2) of ANTE_MAX wins the run.
+ANTE_MAX: int = 8
+
 # ---------------------------------------------------------------------------
 # Economy
 # ---------------------------------------------------------------------------

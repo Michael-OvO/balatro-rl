@@ -143,6 +143,33 @@ def deck_from_python(gs: "GameState"):
 
 
 # ---------------------------------------------------------------------------
+# Required-score table builder (for the JAX advance branch)
+# ---------------------------------------------------------------------------
+
+def build_required_table(scale: float):
+    """Build the int32[9,3] required-score table the JAX engine consults when it
+    advances across a blind boundary (``CoreState.required_table``).
+
+    Entry ``[ante, blind_index]`` = ``engine.required_score(ante, blind, scale, NONE)``
+    for ante 1..8 and blind 0..2. Row 0 is unused (antes are 1-based) and left zero,
+    matching ``zeros_state``'s placeholder shape. Bosses are disabled, so the boss
+    blind (index 2) uses the default 2x multiplier (``boss_req_mult(NONE) == 2``) —
+    the same path the parity oracle takes with ``enable_bosses=False``.
+    """
+    import numpy as np
+
+    from balatro_rl.engine.blinds import required_score
+    from balatro_rl.engine.bosses import BossEffect
+
+    NONE = BossEffect.NONE
+    table = np.zeros((9, 3), dtype=np.int32)
+    for ante in range(1, 9):
+        for blind in range(3):
+            table[ante, blind] = required_score(ante, blind, scale, NONE)
+    return table
+
+
+# ---------------------------------------------------------------------------
 # Comparison helper
 # ---------------------------------------------------------------------------
 
