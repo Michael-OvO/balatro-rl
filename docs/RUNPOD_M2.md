@@ -57,17 +57,17 @@ os.makedirs(os.path.expanduser("~/data/balatro"), exist_ok=True)
 row = {"data_source": "balatro", "prompt": [{"role": "user", "content": "play"}],
        "ability": "balatro", "reward_model": {"style": "rule", "ground_truth": ""},
        "extra_info": {"index": 0}}
-for split, n in (("train", 16), ("val", 8)):
+for split, n in (("train", 64), ("val", 16)):   # train rows MUST be >= train_batch_size or
     pd.DataFrame([row] * n).to_parquet(os.path.expanduser(f"~/data/balatro/{split}.parquet"))
-PY
+PY                                                # verl errors "Train dataloader is empty!"
 ```
 
 ## 4. Launch (the validated recipe)
 Canonical launcher — defaults are the proven smoke config; env vars scale it up:
 ```bash
 bash ~/balatro-e6/scripts/balatro_grpo.sh                                   # smoke (Qwen2.5-0.5B, fast)
-MODEL=Qwen/Qwen3-8B LORA=32 TRAIN_BS=16 GROUP=8 MAX_STEPS=350 REQ_START=0.1 EPOCHS=150 \
-  bash ~/balatro-e6/scripts/balatro_grpo.sh                                 # real run
+MODEL=Qwen/Qwen3-8B LORA=32 TRAIN_BS=16 GROUP=8 MAX_STEPS=150 REQ_START=0.1 EPOCHS=8 \
+  bash ~/balatro-e6/scripts/balatro_grpo.sh                                 # real first run (~hours; scale up later)
 ```
 Equivalent programmatic form (prints/launches the same bare overrides on verl's `ppo_trainer` base):
 ```bash
@@ -93,6 +93,24 @@ python -m balatro_rl.llm.train_grpo --model Qwen/Qwen3-8B --print-only      # or
   curriculum `req_scale` ramps from the rolling clear-rate (`curriculum.py`). Start
   `req_scale_start` low so early rollouts clear blinds → reward variance → signal.
 
-## 7. GPU co-existence with E5 PPO
-E5 (JAX PPO) is CPU-bound (~9 GB GPU); M2 vLLM is GPU-bound. They co-exist on one 80 GB card —
-set `gpu_memory_utilization` so vLLM leaves PPO its ~9 GB.
+## 7. Live dashboards (opt-in — both default to console)
+Install once on the pod: `pip install trackio wandb`.
+- **PPO sweep → Trackio (HuggingFace Space):** `huggingface-cli login` (or `HF_TOKEN`), then
+  `TRACKIO_SPACE=<hf-user>/balatro-e5 bash scripts/ppo_sweep.sh` — every run streams to one Space,
+  each a distinct named run (`BALATRO_RUN_NAME`); a browser URL that survives the pod. Unset → console.
+- **8B GiGPO → Weights & Biases:** `export WANDB_API_KEY=...`, then
+  `LOGGER='[console,wandb]' MODEL=Qwen/Qwen3-8B … bash scripts/balatro_grpo.sh` — verl logs
+  reward / success_rate / GPU-util to wandb.
+- Console is always live: `tail -f /workspace/grpo_8b.log`, `tail -f /workspace/<sweep>/run_*/train.log`.
+
+## 8. Co-existence + the throughput reality (measured 2026-06-06)
+- **JAX is CPU-only on this pod** (no `jaxlib-cuda`) → the E5 PPO uses **zero GPU**; the 8B gets the
+  whole H100. Run PPO as a **parallel sweep** (`scripts/ppo_sweep.sh`) — a single run is serial-Python
+  (`SyncVectorEnv` loops envs), ~72 s/update, so cores help only via *more concurrent runs*.
+- **Agentic GPU util is bursty/low (~0–20%, peaks ~87%)** — each turn generates a tiny action then
+  waits on CPU env-steps. Not a bug; agentic RL is rollout-bound. Saturating the GPU would need a
+  JAX-vectorized engine (a rewrite), not a flag.
+- **Right-size or it runs for weeks.** Measured: a GiGPO step (128 eps × 350 turns) is >30 min →
+  600 steps ≈ 2 weeks. For a real first run use `EPOCHS≈8` (~32 steps) + `MAX_STEPS≈150`; PPO needs
+  ~150 warm-started updates (not 2000). The 8B + a PPO sweep contend for CPU — fewer PPO runs
+  speed the 8B's rollout.

@@ -28,7 +28,10 @@ for seed in $SEEDS; do
   for lr in $LRS; do
     out="$ROOT/run_$(printf '%02d' $i)_s${seed}_lr${lr}"
     mkdir -p "$out"
+    # Live dashboard (opt-in): set TRACKIO_SPACE=<hf-user>/<space> to stream all runs to ONE
+    # HuggingFace-Space dashboard, each as a distinct named run. Unset -> console-only.
     ( setsid env OMP_NUM_THREADS=$OMP MKL_NUM_THREADS=$OMP \
+        ${TRACKIO_SPACE:+BALATRO_TRACKIO_SPACE="$TRACKIO_SPACE"} BALATRO_RUN_NAME="$(basename "$out")" \
         BALATRO_RESUME="$BASE_CKPT" BALATRO_EPISODE_DIR="$out" \
         BALATRO_SEED=$seed BALATRO_LR=$lr BALATRO_DMODEL=256 \
         BALATRO_UPDATES=$UPDATES BALATRO_CHECKPOINT_EVERY=50 BALATRO_EARLY_STOP=8 \
