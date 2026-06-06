@@ -32,6 +32,10 @@ from __future__ import annotations
 
 import jax.numpy as jnp
 
+from .config import (
+    HAND_BASE_CHIPS, HAND_BASE_MULT, HAND_INC_CHIPS, HAND_INC_MULT,
+)
+
 # HandType integer codes (kept local so this kernel has no Python-enum import
 # on the hot path; values match engine/hands.py::HandType).
 HIGH_CARD = 0
@@ -136,3 +140,107 @@ def detect_hand_type(ranks, suits, mask) -> jnp.ndarray:
     ht = jnp.where(is_flush & is_five_count, FLUSH_FIVE, ht)
 
     return ht.astype(jnp.int32)
+
+
+def _card_chip(ranks) -> jnp.ndarray:
+    """Per-card base chip value, mirroring engine/cards.py::rank_chip_value.
+
+    Ace (14) -> 11; J/Q/K (11..13) -> 10; 2..10 -> rank. int32[5].
+    """
+    ranks = jnp.asarray(ranks).astype(jnp.int32)
+    chip = jnp.where(ranks == 14, 11, jnp.where(ranks >= 11, 10, ranks))
+    return chip.astype(jnp.int32)
+
+
+def score_core(ranks, suits, mask, levels):
+    """Base scoring for up to 5 played cards (no jokers, plain cards).
+
+    Reproduces the empty-joker / plain-card path of the Python oracle
+    ``balatro_rl.engine.scoring.score_play``:
+      * ``ht = detect_hand_type(...)``
+      * ``base_chips = HAND_BASE_CHIPS[ht] + HAND_INC_CHIPS[ht] * (lvl - 1)``
+      * ``mult       = HAND_BASE_MULT[ht]  + HAND_INC_MULT[ht]  * (lvl - 1)``
+      * ``chips = base_chips + sum(card_chip(r) for scoring cards)``
+      * ``score = chips * mult``
+
+    where ``lvl = levels[ht]`` and the scoring-card subset mirrors the oracle's
+    ``evaluate`` ``scoring_indices`` for the detected hand type. There are no
+    other additive/multiplicative sources on the empty-joker plain-card path
+    (no held-card bonuses, enhancements, editions, seals, or steel).
+
+    Args:
+        ranks:  int8[5], rank per slot (2..14; 0 for empty).
+        suits:  int8[5], suit per slot (0..3; ignored where mask is False).
+        mask:   bool[5], True for slots holding a real played card.
+        levels: int32[12], per-HandType level (>=1) in HandType order.
+
+    Returns:
+        (hand_type int32, chips int32, mult int32, score int32) scalars.
+
+    Branchless: no Python control flow over traced values; jit- and vmap-able.
+    """
+    ranks = jnp.asarray(ranks).astype(jnp.int32)
+    suits = jnp.asarray(suits).astype(jnp.int32)
+    m = jnp.asarray(mask).astype(jnp.bool_)
+    levels = jnp.asarray(levels).astype(jnp.int32)
+
+    ht = detect_hand_type(ranks, suits, m)
+
+    # --- leveled base chips / mult (HAND_BASE + HAND_INC * (lvl - 1)) --------
+    lvl = levels[ht]
+    base_chips = HAND_BASE_CHIPS[ht] + HAND_INC_CHIPS[ht] * (lvl - 1)
+    mult = HAND_BASE_MULT[ht] + HAND_INC_MULT[ht] * (lvl - 1)
+
+    # --- rank histogram (same quantities detect_hand_type uses) -------------
+    mi = m.astype(jnp.int32)
+    rank_bucket = ranks - 2  # may be -2 for empty (rank 0); masked out below.
+    rank_oh = (rank_bucket[:, None] == jnp.arange(_N_RANK_BUCKETS)[None, :])
+    rank_oh = rank_oh.astype(jnp.int32) * mi[:, None]
+    rank_counts = jnp.sum(rank_oh, axis=0)  # int32[13]
+
+    # Per-slot count of that slot's own rank (gather; 0 for empty slots).
+    safe_bucket = jnp.clip(rank_bucket, 0, _N_RANK_BUCKETS - 1)
+    slot_rank_count = rank_counts[safe_bucket] * mi  # int32[5]
+
+    # --- scoring mask per hand-type category (mirror evaluate's scoring_idx) -
+    # n-of-a-kind hands score exactly the cards of the forming rank, by count:
+    #   PAIR/TWO_PAIR -> count==2; THREE -> count==3; FOUR -> count==4.
+    mask_eq2 = (slot_rank_count == 2) & m
+    mask_eq3 = (slot_rank_count == 3) & m
+    mask_eq4 = (slot_rank_count == 4) & m
+
+    # HIGH_CARD -> only the single highest-rank valid card; ties resolve to the
+    # FIRST (lowest-index) such slot, matching Python's max(..., key=rank) which
+    # returns the first argmax. Build a one-hot at that slot.
+    valid_rank = jnp.where(m, ranks, jnp.int32(-1))
+    hi_rank = jnp.max(valid_rank)
+    is_hi = (valid_rank == hi_rank) & m
+    # First True index (argmax of the boolean picks the lowest index that is True).
+    first_hi = jnp.argmax(is_hi.astype(jnp.int32))
+    mask_high = jnp.zeros_like(m).at[first_hi].set(True) & m
+
+    # All-cards hands: STRAIGHT/FLUSH/STRAIGHT_FLUSH/FULL_HOUSE/FIVE/
+    # FLUSH_HOUSE/FLUSH_FIVE all score every played card.
+    mask_all = m
+
+    # Select the scoring mask for the detected hand type. Built as a where-chain
+    # (default HIGH_CARD): each ht is exactly one category.
+    is_pair_like2 = (ht == PAIR) | (ht == TWO_PAIR)
+    is_all = (
+        (ht == STRAIGHT) | (ht == FLUSH) | (ht == FULL_HOUSE)
+        | (ht == STRAIGHT_FLUSH) | (ht == FIVE_OF_A_KIND)
+        | (ht == FLUSH_HOUSE) | (ht == FLUSH_FIVE)
+    )
+    scoring_mask = mask_high
+    scoring_mask = jnp.where(is_pair_like2, mask_eq2, scoring_mask)
+    scoring_mask = jnp.where(ht == THREE_OF_A_KIND, mask_eq3, scoring_mask)
+    scoring_mask = jnp.where(ht == FOUR_OF_A_KIND, mask_eq4, scoring_mask)
+    scoring_mask = jnp.where(is_all, mask_all, scoring_mask)
+
+    # --- sum the chip value of the scoring cards ----------------------------
+    card_chips = _card_chip(ranks)
+    chips = base_chips + jnp.sum(jnp.where(scoring_mask, card_chips, 0))
+
+    score = chips * mult
+    return (ht.astype(jnp.int32), chips.astype(jnp.int32),
+            mult.astype(jnp.int32), score.astype(jnp.int32))
