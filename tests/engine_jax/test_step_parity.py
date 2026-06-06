@@ -25,6 +25,7 @@ from balatro_rl.envs.actions import decode, legal_mask, PLAY_N
 from balatro_rl.engine_jax import step as J
 from balatro_rl.engine_jax.config import MAX_HAND
 from tests.engine_jax.parity_util import (
+    assert_hand_slots_equal,
     assert_states_equal,
     deck_from_python,
     jax_core_fields,
@@ -87,11 +88,13 @@ def _run_policy(pick_action_id):
                 assert gs2.done
                 assert not bool(sig.cleared)
                 assert_states_equal(python_core_fields(gs2), jax_core_fields(cs2))
+                assert_hand_slots_equal(gs2, cs2)
                 compared += 1
                 break
             else:
                 assert not bool(sig.cleared)
                 assert_states_equal(python_core_fields(gs2), jax_core_fields(cs2))
+                assert_hand_slots_equal(gs2, cs2)
                 compared += 1
                 gs, cs = gs2, cs2
     return compared

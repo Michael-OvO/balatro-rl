@@ -174,3 +174,48 @@ def assert_states_equal(py: dict, jx: dict) -> None:
         raise AssertionError(
             f"Field 'hand' (sorted) mismatch:\n  Python={py['hand']}\n  JAX={jx['hand']}"
         )
+
+
+def assert_hand_slots_equal(gs: "GameState", cs: "CoreState") -> None:
+    """Assert the hand matches SLOT-BY-SLOT (ordered), not just as a multiset.
+
+    Slot order is load-bearing: the flat action id maps to slot indices via
+    ``_SUBSETS`` (so the same id selects the same physical cards on both engines),
+    and Task 1.5's obs parity compares per-slot card features. ``assert_states_equal``
+    only checks the SORTED hand multiset, so it cannot catch a slot-order divergence
+    — this helper does.
+
+    For each of the 8 JAX hand slots:
+      * if Python ``gs.hand`` has a card at that slot, the JAX slot must be occupied
+        (``hand_mask`` True) with the same (rank, suit);
+      * if Python has no card there (hand shorter than 8 near the deck end), the JAX
+        slot must be empty (``hand_mask`` False).
+
+    Raises AssertionError naming the first mismatching slot.
+    """
+    import numpy as np
+
+    mask = np.asarray(cs.hand_mask, dtype=bool)
+    ranks = np.asarray(cs.hand_rank, dtype=int)
+    suits = np.asarray(cs.hand_suit, dtype=int)
+    n_slots = len(mask)
+    py_hand = list(gs.hand)
+
+    for i in range(n_slots):
+        py_has = i < len(py_hand)
+        jx_has = bool(mask[i])
+        if py_has != jx_has:
+            raise AssertionError(
+                f"Hand slot {i} occupancy mismatch: "
+                f"Python {'occupied' if py_has else 'empty'}, "
+                f"JAX {'occupied' if jx_has else 'empty'} "
+                f"(Python hand len={len(py_hand)})"
+            )
+        if py_has:
+            py_card = (int(py_hand[i].rank), int(py_hand[i].suit))
+            jx_card = (int(ranks[i]), int(suits[i]))
+            if py_card != jx_card:
+                raise AssertionError(
+                    f"Hand slot {i} card mismatch (ordered): "
+                    f"Python={py_card}, JAX={jx_card}"
+                )
