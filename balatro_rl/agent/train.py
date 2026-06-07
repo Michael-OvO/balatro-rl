@@ -16,6 +16,7 @@ import optax
 from flax.training.train_state import TrainState
 
 from ..envs.actions import NUM_ACTIONS
+from ..envs.jax_vec_env import JaxVectorEnv
 from ..envs.vec_env import SyncVectorEnv
 from .eval import evaluate
 from .metrics_logger import NullLogger
@@ -63,6 +64,10 @@ class TrainConfig:
     early_stop_patience: int = 0
     early_stop_metric: str = "eval/mean_blinds_cleared"
     early_stop_min_delta: float = 0.0
+    # Engine selector: "python" (default) uses SyncVectorEnv; "jax" uses JaxVectorEnv
+    # (GPU-native, no boss support).  JaxVectorEnv requires enable_bosses=False and
+    # reward_name="shaped".
+    engine: str = "python"
 
 
 @dataclasses.dataclass
@@ -168,9 +173,14 @@ def train(cfg: TrainConfig, logger=None, init_params=None, on_update=None) -> Tr
     # Boss probability tracks the score curriculum (E5); 1.0 when the boss curriculum is off.
     def _boss_rate_for(scale: float) -> float:
         return float(scale) if cfg.boss_curriculum else 1.0
-    venv = SyncVectorEnv(cfg.num_envs, cfg.reward_name, base_seed=cfg.seed + 1000,
-                         req_scale=cur_scale, enable_bosses=cfg.enable_bosses,
-                         boss_rate=_boss_rate_for(cur_scale))
+    if cfg.engine == "jax":
+        venv = JaxVectorEnv(cfg.num_envs, reward_name=cfg.reward_name,
+                            base_seed=cfg.seed + 1000, req_scale=cur_scale,
+                            enable_bosses=cfg.enable_bosses)
+    else:
+        venv = SyncVectorEnv(cfg.num_envs, cfg.reward_name, base_seed=cfg.seed + 1000,
+                             req_scale=cur_scale, enable_bosses=cfg.enable_bosses,
+                             boss_rate=_boss_rate_for(cur_scale))
     next_obs, next_mask = venv.reset()
     T, N = cfg.num_steps, cfg.num_envs
     assert (T * N) % cfg.num_minibatches == 0, (
