@@ -7,6 +7,14 @@ Note: ``reset`` accepts host-provided deck ordering (ranks + suits as length-52
 sequences) and a host-computed ``required`` score so that the JAX engine can be
 seeded byte-identically to the Python oracle.  Real JAX-native seeding/shuffling
 will be added in Task 1.7; for now the PRNG key is fixed at [0, 0].
+
+Task 1.7 additions:
+  - ``decode_action(action_id) -> (verb, sel_mask bool[8])``: branchless flat-id decoder.
+  - ``reset_jax(key, required_table) -> CoreState``: self-shuffling JAX-native reset.
+  - ``step_with_action(state, action_id) -> (CoreState, StepSignals)``: decodes +
+    calls ``step`` + auto-resets on done (mirrors SyncVectorEnv contract).
+  - ``batched_reset = jax.vmap(reset_jax, in_axes=(0, None))``.
+  - ``batched_step  = jax.vmap(step_with_action)``.
 """
 from __future__ import annotations
 
@@ -14,6 +22,7 @@ from typing import NamedTuple, Sequence
 
 import jax
 import jax.numpy as jnp
+import numpy as np
 
 from balatro_rl.engine_jax.config import (
     ANTE_MAX,
@@ -22,12 +31,83 @@ from balatro_rl.engine_jax.config import (
     MAX_HAND,
     MAX_SELECT,
     N_HAND_TYPES,
+    NUM_ACTIONS,
     Phase,
     STARTING_MONEY,
     Verb,
 )
 from balatro_rl.engine_jax.scoring import score_core
 from balatro_rl.engine_jax.state import DECK_SIZE, CoreState
+
+# Re-export for tests that import from this module.
+NUM_ACTIONS_JAX = NUM_ACTIONS
+
+# ---------------------------------------------------------------------------
+# Static subset → sel_mask table (built ONCE at import; never retraced)
+# ---------------------------------------------------------------------------
+# Import _SUBSETS from the Python actions module.  This is a module-level
+# constant (list of tuples), never traced by JAX.
+from balatro_rl.envs.actions import _SUBSETS as _PY_SUBSETS  # noqa: E402
+
+_N_SUBSETS: int = len(_PY_SUBSETS)  # 218
+
+# SEL_MASK_TABLE[k] is a bool[MAX_HAND=8] array where True marks the card slots
+# belonging to subset k.  Built with plain numpy first, then frozen as a jnp
+# constant so it never participates in tracing.
+_SEL_MASK_NP = np.zeros((_N_SUBSETS, MAX_HAND), dtype=bool)
+for _k, _idxs in enumerate(_PY_SUBSETS):
+    for _i in _idxs:
+        _SEL_MASK_NP[_k, _i] = True
+SEL_MASK_TABLE: jnp.ndarray = jnp.array(_SEL_MASK_NP, dtype=bool)  # [218, MAX_HAND]
+
+# ---------------------------------------------------------------------------
+# Static canonical deck: rank and suit arrays for the full 52-card master deck.
+# ranks: 2..14 × 4 suits (0..3), total 52 cards.
+# Order: ranks 2,3,...,14 each with suits 0,1,2,3 → 52 entries.
+# ---------------------------------------------------------------------------
+_deck_ranks_np = np.array(
+    [r for r in range(2, 15) for _ in range(4)], dtype=np.int8
+)  # [52]
+_deck_suits_np = np.array(
+    [s for _ in range(2, 15) for s in range(4)], dtype=np.int8
+)  # [52]
+_MASTER_DECK_RANK: jnp.ndarray = jnp.array(_deck_ranks_np)  # [52] int8
+_MASTER_DECK_SUIT: jnp.ndarray = jnp.array(_deck_suits_np)  # [52] int8
+
+
+# ---------------------------------------------------------------------------
+# decode_action: flat action id -> (verb int32, sel_mask bool[MAX_HAND])
+# ---------------------------------------------------------------------------
+
+def decode_action(action_id: jnp.ndarray):
+    """Branchlessly decode a flat action id into (verb, sel_mask bool[8]).
+
+    PLAY ids [0, 218):        verb=PLAY,    sel_mask=SEL_MASK_TABLE[action_id].
+    DISCARD ids [218, 436):   verb=DISCARD, sel_mask=SEL_MASK_TABLE[action_id-218].
+    Other ids [436, 708):     verb=PLAY,    sel_mask=all-False (no-op; never legal).
+
+    Branchless: uses jnp.where on the id ranges; JIT/vmap-able.
+    """
+    action_id = jnp.asarray(action_id, dtype=jnp.int32)
+    is_play    = action_id < _N_SUBSETS               # [0, 218)
+    is_discard = (~is_play) & (action_id < 2 * _N_SUBSETS)  # [218, 436)
+
+    # Subset index into SEL_MASK_TABLE (safe even for out-of-range ids).
+    play_idx    = jnp.clip(action_id, 0, _N_SUBSETS - 1)
+    discard_idx = jnp.clip(action_id - _N_SUBSETS, 0, _N_SUBSETS - 1)
+
+    play_mask    = SEL_MASK_TABLE[play_idx]     # bool[MAX_HAND]
+    discard_mask = SEL_MASK_TABLE[discard_idx]  # bool[MAX_HAND]
+    noop_mask    = jnp.zeros(MAX_HAND, dtype=bool)
+
+    # Select sel_mask
+    sel_mask = jnp.where(is_play, play_mask,
+                jnp.where(is_discard, discard_mask, noop_mask))
+
+    # Select verb
+    verb = jnp.where(is_discard, jnp.int32(Verb.DISCARD), jnp.int32(Verb.PLAY))
+
+    return verb, sel_mask
 
 
 def reset(
@@ -377,3 +457,141 @@ def step(state: CoreState, verb, sel_mask):
         score=jnp.where(is_play, score, jnp.int32(0)),
     )
     return next_state, signals
+
+
+# ---------------------------------------------------------------------------
+# Task 1.7: JAX-native reset, flat-action step, batched variants
+# ---------------------------------------------------------------------------
+
+def reset_jax(key: jnp.ndarray, required_table: jnp.ndarray) -> CoreState:
+    """Self-shuffling JAX-native reset for standalone on-device rollout.
+
+    Builds a canonical 52-card master deck (ranks 2..14 × suits 0..3), shuffles
+    it with ``key`` via ``jax.random.permutation``, deals the first MAX_HAND cards
+    to the opening hand, sets all scalars as in the host-seeded ``reset``, and
+    stores a split of ``key`` as the in-state PRNG for future reshuffles.
+
+    Parameters
+    ----------
+    key:
+        A JAX PRNGKey (uint32[2]) — consumed once for the deck shuffle; one
+        half of the split is stored in state.rng for subsequent deck reshuffles
+        when advancing blinds.
+    required_table:
+        int32[9, 3] required-score lookup: ``[ante, blind_index]`` → chips needed.
+        Row 0 is unused (antes are 1-based).
+
+    Returns
+    -------
+    CoreState
+        Fresh episode: ante=1, small blind, opening hand dealt, all counters reset.
+    """
+    # Split key: sub is used for the shuffle; key2 is stored as state.rng.
+    key2, sub = jax.random.split(key)
+
+    # Shuffle the master deck.
+    perm = jax.random.permutation(sub, DECK_SIZE)
+    deck_rank = _MASTER_DECK_RANK[perm]   # int8[52]
+    deck_suit = _MASTER_DECK_SUIT[perm]   # int8[52]
+
+    hand_rank = deck_rank[:MAX_HAND]       # int8[8]
+    hand_suit = deck_suit[:MAX_HAND]       # int8[8]
+    hand_mask = jnp.ones(MAX_HAND, dtype=bool)
+    deck_ptr  = jnp.array(MAX_HAND, dtype=jnp.int32)
+
+    levels           = jnp.ones(N_HAND_TYPES, dtype=jnp.int32)
+    hand_plays_run   = jnp.zeros(N_HAND_TYPES, dtype=jnp.int32)
+    hand_plays_round = jnp.zeros(N_HAND_TYPES, dtype=jnp.int32)
+
+    req_table = jnp.asarray(required_table, dtype=jnp.int32)  # no-op if already jnp
+    required  = req_table[1, 0]   # ante=1, small blind
+
+    return CoreState(
+        deck_rank=deck_rank,
+        deck_suit=deck_suit,
+        deck_ptr=deck_ptr,
+
+        hand_rank=hand_rank,
+        hand_suit=hand_suit,
+        hand_mask=hand_mask,
+
+        ante=jnp.array(1, dtype=jnp.int32),
+        blind_index=jnp.array(0, dtype=jnp.int32),
+        round_score=jnp.array(0, dtype=jnp.int32),
+        required=required,
+        hands_left=jnp.array(HANDS_PER_BLIND, dtype=jnp.int32),
+        discards_left=jnp.array(DISCARDS_PER_BLIND, dtype=jnp.int32),
+        hand_size=jnp.array(MAX_HAND, dtype=jnp.int32),
+        required_table=req_table,
+
+        money=jnp.array(STARTING_MONEY, dtype=jnp.int32),
+
+        levels=levels,
+        hand_plays_run=hand_plays_run,
+        hand_plays_round=hand_plays_round,
+
+        phase=jnp.array(Phase.PLAYING, dtype=jnp.int32),
+        done=jnp.array(False, dtype=bool),
+        won=jnp.array(False, dtype=bool),
+
+        rng=jnp.asarray(key2, dtype=jnp.uint32),
+    )
+
+
+def step_with_action(state: CoreState, action_id: jnp.ndarray):
+    """Decode ``action_id`` → ``step`` → auto-reset on done.
+
+    Mirrors the SyncVectorEnv contract exactly:
+
+      SyncVectorEnv.step (for a single sub-env):
+        1. Step the live env → (obs, reward, done, info).
+        2. If done: obs = env.reset() — the INITIAL obs of the fresh episode.
+        3. Return obs (INITIAL fresh obs if done, else post-step), done, reward.
+
+    Implementation:
+      * Decode ``action_id`` to ``(verb, sel_mask)`` via ``decode_action``.
+      * Call ``step(state, verb, sel_mask)`` to get ``(next_state, signals)``.
+      * If ``next_state.done``, replace ``next_state`` with ``reset_jax(...)``
+        (the INITIAL reset — NOT stepped again), so the caller receives the
+        first observation of the new episode.  Signals carry the terminal info.
+
+    The PPO loop should always feed live (not-done) states to ``step_with_action``
+    because this function returns a non-done state whenever the step terminates.
+    Stepping an already-done state is branchless and safe (``step`` runs on the
+    terminal state; the outgoing done=True immediately triggers auto-reset).
+
+    Branchless: uses ``jnp.where`` for the done-select; JIT/vmap-compatible.
+
+    Returns ``(final_state, StepSignals)`` where:
+      - ``final_state``: INITIAL fresh episode if done, else post-step state.
+      - ``StepSignals``: reflects the transition just applied (terminal info
+        preserved even when the episode ends).
+    """
+    action_id = jnp.asarray(action_id, dtype=jnp.int32)
+    verb, sel_mask = decode_action(action_id)
+
+    # --- step the live state --------------------------------------------------
+    next_state, signals = step(state, verb, sel_mask)
+
+    # --- auto-reset on outgoing done (mirrors SyncVectorEnv) ------------------
+    # When next_state.done, return the INITIAL obs of a fresh episode (do NOT
+    # step the fresh state — SyncVectorEnv returns env.reset(), not a post-step).
+    # Signals already carry the terminal transition info; we keep them as-is.
+    fresh_after = reset_jax(next_state.rng, next_state.required_table)
+    final_state = jax.tree_util.tree_map(
+        lambda fresh, ns: jnp.where(next_state.done, fresh, ns),
+        fresh_after, next_state,
+    )
+
+    return final_state, signals
+
+
+# ---------------------------------------------------------------------------
+# Batched variants (vmap wrappers — jit/vmap-able)
+# ---------------------------------------------------------------------------
+
+# batched_reset: vmap over keys; required_table is broadcast (same for all envs).
+batched_reset = jax.vmap(reset_jax, in_axes=(0, None))
+
+# batched_step: vmap over (states, action_ids), both batched per-env.
+batched_step = jax.vmap(step_with_action)
