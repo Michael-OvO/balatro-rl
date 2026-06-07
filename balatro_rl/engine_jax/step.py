@@ -1,20 +1,19 @@
-"""JAX engine step functions: reset (and future step/play/discard).
+"""JAX engine: full game-loop for on-device PPO rollout.
 
-Only ``reset`` is implemented here for Task 0.4.  Future tasks will add
-``step``, ``play``, and ``discard``.
+This module implements the complete within-blind transition and batched env
+adapter for the JAX core engine:
 
-Note: ``reset`` accepts host-provided deck ordering (ranks + suits as length-52
-sequences) and a host-computed ``required`` score so that the JAX engine can be
-seeded byte-identically to the Python oracle.  Real JAX-native seeding/shuffling
-will be added in Task 1.7; for now the PRNG key is fixed at [0, 0].
+  - ``reset(deck_rank, deck_suit, required, ...)`` — host-seeded reset (parity).
+  - ``reset_jax(key, required_table) -> CoreState`` — self-shuffling JAX-native reset.
+  - ``decode_action(action_id) -> (verb, sel_mask bool[8])`` — branchless flat-id decoder.
+  - ``step(state, verb, sel_mask) -> (CoreState, StepSignals)`` — within-blind transition.
+  - ``step_with_action(state, action_id) -> (CoreState, reward, done, StepSignals)`` —
+    decodes + steps + computes shaped reward on the TERMINAL next-state + auto-resets.
+  - ``batched_reset = jax.vmap(reset_jax, in_axes=(0, None))`` — N-env parallel reset.
+  - ``batched_step  = jax.vmap(step_with_action)`` — N-env parallel step.
 
-Task 1.7 additions:
-  - ``decode_action(action_id) -> (verb, sel_mask bool[8])``: branchless flat-id decoder.
-  - ``reset_jax(key, required_table) -> CoreState``: self-shuffling JAX-native reset.
-  - ``step_with_action(state, action_id) -> (CoreState, StepSignals)``: decodes +
-    calls ``step`` + auto-resets on done (mirrors SyncVectorEnv contract).
-  - ``batched_reset = jax.vmap(reset_jax, in_axes=(0, None))``.
-  - ``batched_step  = jax.vmap(step_with_action)``.
+The reward is computed from the TERMINAL next-state (before auto-reset), ensuring
+the potential-based shaping uses the correct final ante/score/blind fields.
 """
 from __future__ import annotations
 
@@ -36,6 +35,7 @@ from balatro_rl.engine_jax.config import (
     STARTING_MONEY,
     Verb,
 )
+from balatro_rl.engine_jax.rewards import shaped_core
 from balatro_rl.engine_jax.scoring import score_core
 from balatro_rl.engine_jax.state import DECK_SIZE, CoreState
 
@@ -539,33 +539,30 @@ def reset_jax(key: jnp.ndarray, required_table: jnp.ndarray) -> CoreState:
 
 
 def step_with_action(state: CoreState, action_id: jnp.ndarray):
-    """Decode ``action_id`` → ``step`` → auto-reset on done.
+    """Decode ``action_id`` → ``step`` → reward → auto-reset on done.
 
     Mirrors the SyncVectorEnv contract exactly:
 
       SyncVectorEnv.step (for a single sub-env):
-        1. Step the live env → (obs, reward, done, info).
-        2. If done: obs = env.reset() — the INITIAL obs of the fresh episode.
-        3. Return obs (INITIAL fresh obs if done, else post-step), done, reward.
+        1. Step the live env → (next_state, signals).
+        2. Compute ``done = next_state.done``.
+        3. Compute ``reward = shaped_core(state, next_state, ...)`` using the
+           TERMINAL next_state (before any reset) so the potential is evaluated
+           at the episode's final ante/score fields.
+        4. If done: auto-reset next_state → fresh episode initial state.
+        5. Return (final_state, reward, done, signals).
 
-    Implementation:
-      * Decode ``action_id`` to ``(verb, sel_mask)`` via ``decode_action``.
-      * Call ``step(state, verb, sel_mask)`` to get ``(next_state, signals)``.
-      * If ``next_state.done``, replace ``next_state`` with ``reset_jax(...)``
-        (the INITIAL reset — NOT stepped again), so the caller receives the
-        first observation of the new episode.  Signals carry the terminal info.
-
-    The PPO loop should always feed live (not-done) states to ``step_with_action``
-    because this function returns a non-done state whenever the step terminates.
-    Stepping an already-done state is branchless and safe (``step`` runs on the
-    terminal state; the outgoing done=True immediately triggers auto-reset).
+    The PPO loop feeds live (not-done) states; stepping an already-done state
+    is branchless and safe (step runs on the terminal; outgoing done=True
+    immediately triggers auto-reset).
 
     Branchless: uses ``jnp.where`` for the done-select; JIT/vmap-compatible.
 
-    Returns ``(final_state, StepSignals)`` where:
-      - ``final_state``: INITIAL fresh episode if done, else post-step state.
-      - ``StepSignals``: reflects the transition just applied (terminal info
-        preserved even when the episode ends).
+    Returns ``(final_state, reward, done, StepSignals)`` where:
+      - ``final_state``: INITIAL fresh episode state if done, else post-step.
+      - ``reward``:      float32 shaped reward computed on the TERMINAL state.
+      - ``done``:        bool scalar, True iff the step produced a terminal.
+      - ``StepSignals``: terminal transition info (cleared/won/hand_type/score).
     """
     action_id = jnp.asarray(action_id, dtype=jnp.int32)
     verb, sel_mask = decode_action(action_id)
@@ -573,17 +570,26 @@ def step_with_action(state: CoreState, action_id: jnp.ndarray):
     # --- step the live state --------------------------------------------------
     next_state, signals = step(state, verb, sel_mask)
 
+    # --- done flag (from the terminal next_state, before any reset) -----------
+    done = next_state.done  # bool scalar
+
+    # --- reward on the TERMINAL next_state ------------------------------------
+    # Compute reward BEFORE auto-reset so the potential Φ(nxt) uses the terminal
+    # ante/round_score/required, not the fresh-episode reset values. This is the
+    # key correctness point: the bonus for clearing/winning must use the terminal.
+    reward = shaped_core(state, next_state, signals.cleared, signals.won)
+
     # --- auto-reset on outgoing done (mirrors SyncVectorEnv) ------------------
-    # When next_state.done, return the INITIAL obs of a fresh episode (do NOT
-    # step the fresh state — SyncVectorEnv returns env.reset(), not a post-step).
+    # When done, return the INITIAL obs of a fresh episode (NOT a post-step),
+    # so the caller receives the first observation of the new episode.
     # Signals already carry the terminal transition info; we keep them as-is.
     fresh_after = reset_jax(next_state.rng, next_state.required_table)
     final_state = jax.tree_util.tree_map(
-        lambda fresh, ns: jnp.where(next_state.done, fresh, ns),
+        lambda fresh, ns: jnp.where(done, fresh, ns),
         fresh_after, next_state,
     )
 
-    return final_state, signals
+    return final_state, reward, done, signals
 
 
 # ---------------------------------------------------------------------------

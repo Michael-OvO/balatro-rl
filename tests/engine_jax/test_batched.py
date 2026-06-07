@@ -1,16 +1,18 @@
-"""Task 1.7: batched env (vmap) + flat-action adapter.
+"""Task 1.7 / 1.8: batched env (vmap) + flat-action adapter + reward/done contract.
 
 Tests:
   1. decode_action matches Python decode on [0, 436).
   2. batched_reset over N=1024 distinct keys produces CoreState with leading dim 1024.
   3. vmapped encode_core over batched state produces obs dict with leading dim 1024.
   4. jit(batched_step) over N=1024 envs runs; outputs have leading dim 1024.
-  5. vmap consistency: batched_step lane i == step_with_action(states[i], action_ids[i]).
+  5. vmap consistency: batched_step lane i == step_with_action(states[i], action_ids[i])
+     for single-card PLAY, a DISCARD id, and a multi-card PLAY id; reward/done compared.
   6. auto-reset: step an env to done -> returned state is fresh episode while
      signals show terminal.
+  7. Reward uses the TERMINAL state (not the fresh-reset state): a LOST transition
+     must produce a reward that differs from a fresh-episode reward.
 """
 import numpy as np
-import pytest
 import jax
 import jax.numpy as jnp
 
@@ -18,6 +20,7 @@ from balatro_rl.envs.actions import _SUBSETS, decode as py_decode, PLAY_N
 from balatro_rl.engine_jax import step as J
 from balatro_rl.engine_jax.obs import encode_core, legal_mask_core
 from balatro_rl.engine_jax.config import Phase, Verb, HANDS_PER_BLIND, DISCARDS_PER_BLIND, MAX_HAND
+from balatro_rl.engine_jax.rewards import shaped_core
 from tests.engine_jax.parity_util import build_required_table
 
 
@@ -204,32 +207,38 @@ def test_batched_reset_obs_shape():
 
 
 # ---------------------------------------------------------------------------
-# 4. step_with_action
+# 4. step_with_action — new signature: (final_state, reward, done, signals)
 # ---------------------------------------------------------------------------
 
 def test_step_with_action_basic():
-    """step_with_action returns (CoreState, StepSignals) for a legal action."""
+    """step_with_action returns (CoreState, reward, done, StepSignals) for a legal action."""
     key = jax.random.PRNGKey(5)
     req_table = _default_required_table()
     state = J.reset_jax(key, req_table)
     # action 0 = PLAY subset (0,) — single card; always legal at fresh start
-    next_state, signals = J.step_with_action(state, jnp.int32(0))
-    assert isinstance(next_state, J.CoreState)
+    final_state, reward, done, signals = J.step_with_action(state, jnp.int32(0))
+    assert isinstance(final_state, J.CoreState)
     assert isinstance(signals, J.StepSignals)
+    assert reward.shape == ()          # scalar float32
+    assert reward.dtype == jnp.float32
+    assert done.shape == ()            # scalar bool
+    assert done.dtype == jnp.bool_
 
 
 def test_step_with_action_jit():
-    """step_with_action is JIT-compilable."""
+    """step_with_action is JIT-compilable with new 4-tuple return."""
     key = jax.random.PRNGKey(3)
     req_table = _default_required_table()
     state = J.reset_jax(key, req_table)
     jit_step = jax.jit(J.step_with_action)
-    next_state, signals = jit_step(state, jnp.int32(0))
-    assert next_state.ante.shape == ()
+    final_state, reward, done, signals = jit_step(state, jnp.int32(0))
+    assert final_state.ante.shape == ()
+    assert reward.shape == ()
+    assert done.shape == ()
 
 
 # ---------------------------------------------------------------------------
-# 5. batched_step
+# 5. batched_step — new signature: (final_states, rewards, dones, signals)
 # ---------------------------------------------------------------------------
 
 def test_batched_step_shape():
@@ -242,33 +251,53 @@ def test_batched_step_shape():
     action_ids = jnp.zeros(N, dtype=jnp.int32)
 
     jit_batched_step = jax.jit(J.batched_step)
-    next_states, signals = jit_batched_step(states, action_ids)
+    next_states, rewards, dones, signals = jit_batched_step(states, action_ids)
 
     assert next_states.ante.shape == (N,)
     assert next_states.deck_rank.shape == (N, 52)
+    assert rewards.shape == (N,)
+    assert rewards.dtype == jnp.float32
+    assert dones.shape == (N,)
     assert signals.cleared.shape == (N,)
     assert signals.score.shape == (N,)
 
 
 def test_batched_step_vmap_consistency():
-    """batched_step lane i == step_with_action(states[i], action_ids[i])."""
+    """batched_step lane i == step_with_action(states[i], action_ids[i]).
+
+    Covers:
+      - A single-card PLAY id (0)
+      - A DISCARD id (PLAY_N + 0 = 218)
+      - A multi-card PLAY id (e.g. subset index for (0,1) = 8)
+      - Checks reward and done outputs match between batched and single-env.
+    """
     N_CHECK = 8
     keys = _make_keys(N_CHECK, seed=7)
     req_table = _default_required_table()
     states = J.batched_reset(keys, req_table)
 
-    # Use a mix of legal actions: action 0..7 (PLAY single cards 0..7, all legal at reset)
-    action_ids = jnp.arange(N_CHECK, dtype=jnp.int32)
+    # Mix of action types:
+    #   lanes 0..1:  single-card PLAY  (ids 0, 1)
+    #   lanes 2..3:  DISCARD ids       (ids PLAY_N, PLAY_N+1)
+    #   lanes 4..5:  multi-card PLAY   (ids for 2-card subsets; first 2-card subset
+    #                                   in _SUBSETS is (0,1) at index 8)
+    #   lanes 6..7:  single-card PLAY  (ids 6, 7)
+    _first_2card = next(i for i, s in enumerate(_SUBSETS) if len(s) == 2)
+    action_ids = jnp.array([
+        0, 1,
+        PLAY_N, PLAY_N + 1,
+        _first_2card, _first_2card + 1,
+        6, 7,
+    ], dtype=jnp.int32)
 
-    batch_next, batch_sigs = J.batched_step(states, action_ids)
+    batch_next, batch_rewards, batch_dones, batch_sigs = J.batched_step(states, action_ids)
 
     for i in range(N_CHECK):
-        # Extract lane i from batched state
         lane_state = jax.tree_util.tree_map(lambda x: x[i], states)
-        # Single-env step
-        single_next, single_sigs = J.step_with_action(lane_state, action_ids[i])
+        single_next, single_reward, single_done, single_sigs = J.step_with_action(
+            lane_state, action_ids[i])
 
-        # Compare scalars
+        # Compare state scalars
         for field in ("ante", "blind_index", "round_score", "hands_left",
                       "discards_left", "phase", "done"):
             batch_val = int(getattr(batch_next, field)[i])
@@ -276,7 +305,8 @@ def test_batched_step_vmap_consistency():
             assert batch_val == single_val, (
                 f"Lane {i}, field '{field}': batched={batch_val}, single={single_val}"
             )
-        # Compare hand
+
+        # Compare hand mask
         batch_mask = np.asarray(batch_next.hand_mask[i], dtype=bool)
         single_mask = np.asarray(single_next.hand_mask, dtype=bool)
         assert np.array_equal(batch_mask, single_mask), f"Lane {i} hand_mask mismatch"
@@ -289,6 +319,18 @@ def test_batched_step_vmap_consistency():
                 f"Lane {i}, signal '{sig_field}': batched={b_val}, single={s_val}"
             )
 
+        # Compare reward and done (new in Task 1.8)
+        b_reward = float(batch_rewards[i])
+        s_reward = float(single_reward)
+        assert abs(b_reward - s_reward) < 1e-5, (
+            f"Lane {i}, reward: batched={b_reward:.6f}, single={s_reward:.6f}"
+        )
+        b_done = bool(batch_dones[i])
+        s_done = bool(single_done)
+        assert b_done == s_done, (
+            f"Lane {i}, done: batched={b_done}, single={s_done}"
+        )
+
 
 # ---------------------------------------------------------------------------
 # 6. auto-reset semantics
@@ -297,13 +339,11 @@ def test_batched_step_vmap_consistency():
 def _force_to_done(state, req_table):
     """Drive a single-env state to done by exhausting hands_left with PLAY actions.
 
-    We loop up to 4 plays (HANDS_PER_BLIND=4); a LOST terminal will have done=True.
+    We loop up to 200 steps; a LOST terminal will have done=True.
     If the blind clears before loss, keep stepping until done.
-    Returns (final_state, last_signals).
+    Returns (final_state, last_signals) where final_state.done is True.
+    Calls J.step directly (no auto-reset) so we can observe the terminal.
     """
-    # We drive until done using step_with_action (which auto-resets on done,
-    # but we call the underlying step directly to observe the done signal).
-    # To observe the terminal itself, call J.step directly (no auto-reset).
     max_iters = 200
     cur = state
     last_sigs = None
@@ -314,7 +354,6 @@ def _force_to_done(state, req_table):
         mask = np.asarray(legal_mask_core(cur), dtype=bool)
         play_ids = np.nonzero(mask[:PLAY_N])[0]
         if len(play_ids) == 0:
-            # No legal play (shouldn't happen in PLAYING phase with cards)
             break
         aid = int(play_ids[0])
         verb, sel = J.decode_action(jnp.int32(aid))
@@ -327,55 +366,123 @@ def test_auto_reset_returns_fresh_state():
     key = jax.random.PRNGKey(17)
     req_table = _default_required_table()
 
-    # Use a very low required score so blind clears quickly,
-    # but we want LOST: use scale=1.0 (high required=300) and no discards.
-    # Drive to done by exhausting hands_left.
     state = J.reset_jax(key, req_table)
     done_state, _ = _force_to_done(state, req_table)
     assert bool(done_state.done), "Expected a done state"
 
     # Now call step_with_action on done_state with any action:
     # the auto-reset should give us a fresh state despite done=True input.
-    next_state, signals = J.step_with_action(done_state, jnp.int32(0))
+    final_state, reward, done_flag, signals = J.step_with_action(done_state, jnp.int32(0))
 
     # The returned STATE should be a fresh episode
-    assert int(next_state.ante) == 1, f"Expected ante=1 after auto-reset, got {int(next_state.ante)}"
-    assert int(next_state.round_score) == 0
-    assert int(next_state.hands_left) == HANDS_PER_BLIND
-    assert int(next_state.discards_left) == DISCARDS_PER_BLIND
-    assert int(next_state.phase) == Phase.PLAYING
-    assert not bool(next_state.done)
-    assert jnp.all(next_state.hand_mask), "Fresh state should have full hand"
+    assert int(final_state.ante) == 1, f"Expected ante=1 after auto-reset, got {int(final_state.ante)}"
+    assert int(final_state.round_score) == 0
+    assert int(final_state.hands_left) == HANDS_PER_BLIND
+    assert int(final_state.discards_left) == DISCARDS_PER_BLIND
+    assert int(final_state.phase) == Phase.PLAYING
+    assert not bool(final_state.done)
+    assert jnp.all(final_state.hand_mask), "Fresh state should have full hand"
 
 
 def test_auto_reset_signals_reflect_terminal():
-    """step_with_action on done state: signals come from the terminal transition."""
-    # Build a done state via _force_to_done.
-    # When done=True is the INPUT state, step_with_action still calls step on the
-    # done state (which will do a no-op / trivial transition) and then auto-resets.
-    # The key contract: the RETURNED state is fresh, signals are from that step.
-    # We simply verify the function returns without error and state is fresh.
+    """step_with_action on a LOST transition: done==True and reward differs from fresh.
+
+    Contract: the reward is computed on the TERMINAL next_state (before auto-reset).
+    A LOST episode terminal must have done=True, and the reward (computed at the
+    terminal ante/score) must not equal a fresh-episode no-op reward (which would
+    use ante=1 / round_score=0 — the reset values).  This verifies the terminal
+    state (not the fresh-reset state) is used in shaped_core.
+    """
     key = jax.random.PRNGKey(31)
     req_table = _default_required_table()
     state = J.reset_jax(key, req_table)
-    done_state, _ = _force_to_done(state, req_table)
-    assert bool(done_state.done)
 
-    next_state, signals = J.step_with_action(done_state, jnp.int32(0))
-    # Fresh episode
-    assert not bool(next_state.done)
-    assert int(next_state.ante) == 1
+    # Drive the state to the LAST hand before loss: hands_left=1, not yet done.
+    # We step until hands_left == 1 without clearing (force PLAY on non-clearing state).
+    cur = state
+    max_iters = 200
+    for _ in range(max_iters):
+        if bool(cur.done) or int(cur.hands_left) == 1:
+            break
+        mask = np.asarray(legal_mask_core(cur), dtype=bool)
+        play_ids = np.nonzero(mask[:PLAY_N])[0]
+        if len(play_ids) == 0:
+            break
+        aid = int(play_ids[0])
+        verb, sel = J.decode_action(jnp.int32(aid))
+        next_s, sigs = J.step(cur, verb, sel)
+        if bool(next_s.done):
+            # Already went done before hands_left==1; that's fine — pick this terminal
+            cur = next_s
+            break
+        if not bool(sigs.cleared):
+            cur = next_s   # only advance if we didn't clear (want LOST path)
+        else:
+            # cleared; just advance anyway to keep progressing
+            cur = next_s
+
+    # At this point cur has hands_left <= 1 OR done.
+    # Take one more PLAY step via step_with_action — the transition will be a loss
+    # (or possibly a clear, but either way we get a done transition).
+    # Force this using the underlying step + check done flag.
+    if not bool(cur.done):
+        # Take the terminal step directly to get the done signal
+        mask = np.asarray(legal_mask_core(cur), dtype=bool)
+        play_ids = np.nonzero(mask[:PLAY_N])[0]
+        aid = int(play_ids[0]) if len(play_ids) > 0 else 0
+        term_state, term_sigs = J.step(cur, *J.decode_action(jnp.int32(aid)))
+        # term_state.done must be True (either LOST or cleared/advanced)
+        # Now call step_with_action on cur (the pre-terminal state)
+        final_state, reward, done_flag, signals = J.step_with_action(cur, jnp.int32(aid))
+
+        # done_flag must be True (the transition produced a terminal)
+        assert bool(done_flag), (
+            f"Expected done=True for terminal transition, got done={bool(done_flag)}, "
+            f"hands_left={int(cur.hands_left)}, cleared={bool(signals.cleared)}"
+        )
+
+        # The reward must be computed on the TERMINAL state (not the fresh reset).
+        # Compute the "fresh state reward" as if we had used final_state (post-reset):
+        # shaped_core(fresh, fresh, cleared=False, won=False) — a zero-progress reward.
+        # The terminal reward uses the terminal state's fields (ante/round_score/required),
+        # which differ from a fresh start; thus the rewards must differ.
+        fresh_state = J.reset_jax(final_state.rng, final_state.required_table)
+        # The terminal state that was actually used for the reward is term_state.
+        expected_reward = shaped_core(cur, term_state, term_sigs.cleared, term_sigs.won)
+        assert abs(float(reward) - float(expected_reward)) < 1e-5, (
+            f"Reward mismatch: step_with_action gave {float(reward):.6f}, "
+            f"expected {float(expected_reward):.6f} (computed on terminal state)"
+        )
+
+        # Verify fresh-state reward would differ (the whole point of this test).
+        # A fresh state has round_score=0, ante=1; a mid-game terminal has higher ante
+        # or non-zero round_score — its potential is different.
+        fresh_reward = shaped_core(fresh_state, fresh_state, jnp.bool_(False), jnp.bool_(False))
+        # This assertion checks the INVARIANT: if the terminal state differs from a
+        # fresh state, the rewards must differ. We assert that the terminal reward is
+        # NOT the same as a fresh-state trivial reward (unless the states happen to be
+        # identical, which is extremely unlikely at a loss terminal with any progress).
+        if int(cur.round_score) > 0 or int(cur.ante) > 1:
+            assert abs(float(reward) - float(fresh_reward)) > 1e-6, (
+                "Reward should differ between terminal and fresh-state potential, "
+                f"but both gave {float(reward):.6f}. "
+                "This indicates shaped_core used the fresh-reset state, not the terminal."
+            )
+    else:
+        # cur is already done from the driving loop — still test step_with_action
+        final_state, reward, done_flag, signals = J.step_with_action(cur, jnp.int32(0))
+        assert int(final_state.ante) == 1
+        assert not bool(final_state.done)
 
 
 def test_auto_reset_in_batched_step():
-    """batched_step: lanes that hit done auto-reset to fresh episode."""
+    """batched_step: lanes that hit done auto-reset to fresh episode; live lanes stepped."""
     N_SMALL = 4
     keys = _make_keys(N_SMALL, seed=55)
     req_table = _default_required_table()
     states = J.batched_reset(keys, req_table)
 
     # Force lane 0 to done by consuming all hands_left via step (underlying, no auto-reset)
-    # then construct a batch where lane 0 is done.
     lane0 = jax.tree_util.tree_map(lambda x: x[0], states)
     done_lane0, _ = _force_to_done(lane0, req_table)
     assert bool(done_lane0.done)
@@ -387,21 +494,28 @@ def test_auto_reset_in_batched_step():
     mod_states = jax.tree_util.tree_map(replace_lane0, states, done_lane0)
 
     action_ids = jnp.zeros(N_SMALL, dtype=jnp.int32)
-    next_states, signals = J.batched_step(mod_states, action_ids)
+    next_states, rewards, dones, signals = J.batched_step(mod_states, action_ids)
 
     # Lane 0 should have been auto-reset to a fresh episode
     assert int(next_states.ante[0]) == 1
     assert not bool(next_states.done[0])
     assert int(next_states.hands_left[0]) == HANDS_PER_BLIND
 
-    # Other lanes should NOT have been reset (they were alive)
+    # Other lanes (1..3) should have been stepped once, not reset.
+    # They each started with hands_left = HANDS_PER_BLIND and took one PLAY action,
+    # so their hands_left must have decreased by 1 (unless they cleared, which is
+    # unlikely at full scale for a single-card play).
     for lane_i in range(1, N_SMALL):
-        # They stepped once, so hands_left should be ≤ 4 (may have cleared) but
-        # they were alive at step entry — just check they are not fresh resets
-        # by verifying ante is still set (they could still be ante=1 if not cleared)
-        # The safest check: ante is 1 (they haven't progressed far) and done could be F
-        # (just one step). No assertion here except shapes which we already tested above.
-        pass
+        # The lane was alive before the step, so it should now have hands_left < HANDS_PER_BLIND
+        # (stepped once = hands_left decreased) OR have cleared (unlikely at scale 1.0).
+        lane_hands_left = int(next_states.hands_left[lane_i])
+        lane_cleared = bool(signals.cleared[lane_i])
+        # After one PLAY step from a fresh state: either cleared a blind (rare) or
+        # hands_left dropped by 1.
+        assert lane_cleared or lane_hands_left == HANDS_PER_BLIND - 1, (
+            f"Lane {lane_i}: expected hands_left={HANDS_PER_BLIND - 1} or cleared, "
+            f"got hands_left={lane_hands_left}, cleared={lane_cleared}"
+        )
 
 
 def test_batched_step_large_n_jit():
@@ -410,6 +524,8 @@ def test_batched_step_large_n_jit():
     req_table = _default_required_table()
     states = jax.jit(J.batched_reset)(keys, req_table)
     action_ids = jnp.zeros(N, dtype=jnp.int32)
-    next_states, signals = jax.jit(J.batched_step)(states, action_ids)
+    next_states, rewards, dones, signals = jax.jit(J.batched_step)(states, action_ids)
     assert next_states.ante.shape == (N,)
+    assert rewards.shape == (N,)
+    assert dones.shape == (N,)
     assert signals.score.shape == (N,)
