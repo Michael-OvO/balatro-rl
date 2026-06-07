@@ -190,9 +190,7 @@ def encode_core(state: CoreState) -> dict:
     deck_suit_hist = jnp.sum(suit_oh * undrawn_mask[:, None], axis=0)  # [4]
 
     # -- All out-of-scope arrays zeroed to correct shape / dtype --------------
-    from balatro_rl.envs.obs import (
-        N_BOSS, N_VOUCHER, CONSUM_VOCAB, PACK_KIND_VOCAB, PACK_SIZE_VOCAB, VOUCHER_VOCAB,
-    )
+    from balatro_rl.envs.obs import N_BOSS, N_VOUCHER
     from balatro_rl.envs.actions import MAX_JOKERS, MAX_SHOP, MAX_CONSUM, MAX_PACK, MAX_PACK_ITEMS
 
     return {
