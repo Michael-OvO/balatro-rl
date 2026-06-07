@@ -107,7 +107,6 @@ def _resync_jax_from_python(cs, gs_next):
     import jax.numpy as jnp
 
     r, s = deck_from_python(gs_next)  # full 52-card draw order (hand + deck)
-    n = len(gs_next.hand)
     hand_rank = np.zeros(MAX_HAND, dtype=np.int8)
     hand_suit = np.zeros(MAX_HAND, dtype=np.int8)
     hand_mask = np.zeros(MAX_HAND, dtype=bool)

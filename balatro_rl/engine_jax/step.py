@@ -290,7 +290,6 @@ def step(state: CoreState, verb, sel_mask):
 
     # Boundary predicates (mirror the oracle's _enter_cashout_or_win / _advance_blind).
     won = cleared & (state.ante >= ANTE_MAX) & (state.blind_index == 2)
-    advance = cleared & (~won)
     lost = (~cleared) & (hands_left_after <= 0)
 
     # ====================== non-clearing PLAY successor =======================
