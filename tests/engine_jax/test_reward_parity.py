@@ -63,7 +63,6 @@ import jax.numpy as jnp
 
 # Tolerances
 WITHIN_ATOL = 1e-5
-CLEAR_ATOL  = 1e-4   # money term may diverge slightly at boundary step
 
 # Number of seeds for each sub-test
 N_WITHIN_SEEDS = 50
@@ -254,7 +253,6 @@ def test_episode_reward_parity_with_boundaries():
                 # CLEARED or WON: Φ(nxt) legitimately diverges (economy out of scope).
                 # Only check: finite reward and +1/+10 bonus structure is present
                 # (jax_r should exceed the gamma*Phi(nxt)-Phi(prev) for cleared).
-                import math
                 assert math.isfinite(jax_r), f"shaped_core returned non-finite: {jax_r}"
                 if py_cleared:
                     n_cleared += 1
@@ -335,7 +333,6 @@ def test_win_reward_parity():
 
             if py_cleared:
                 # Non-terminal clear: Φ(nxt) diverges. Only check finiteness.
-                import math
                 assert math.isfinite(jax_r), f"non-finite on clear: {jax_r}"
 
                 if gs2.phase == Phase.SHOP:
