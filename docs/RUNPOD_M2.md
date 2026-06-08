@@ -121,11 +121,13 @@ proven bit-for-bit equal to the Python oracle on the core loop and dropped under
   (scalars + ordered hand slots + the full core observation + the shaped reward) — **12,147
   within-blind transitions + 1,914 blind boundaries, zero mismatches**. (A 200-rollout subset runs by
   default in CI; the 1000-rollout gate is `@pytest.mark.slow`, opt in with `BALATRO_RUN_SLOW=1`.)
-- **Throughput** (`scripts/bench_jax_engine.py`, **CPU M4**, 200-step `lax.scan` over `batched_step`):
-  ~**85,600 env-steps/s @ 1k envs**, ~**90,800 @ 10k envs** → **~800× the old ~114 env-steps/s
-  Python pace, CPU-to-CPU**. On CPU the batch serializes across a few cores so wall-time scales ~linearly
-  (throughput ≈ flat); on a GPU the `vmap` lanes run in parallel, so throughput scales with batch size
-  and the device saturates. The ~800× is the floor.
+- **Throughput** (`scripts/bench_jax_engine.py`, 200-step `lax.scan` over `batched_step`): on an
+  **M4 CPU** ~**85k env-steps/s @ 1k envs** and ~**90k @ 10k** (few cores → wall-time ~linear in
+  batch, throughput ≈ flat); on a **higher-core CPU** the 10k batch scales further (~190k observed) —
+  the absolute numbers are host-dependent. Either way it's **~700–1600× the old ~114 env-steps/s
+  Python pace, CPU-to-CPU** — the JAX win is the branchless `vmap`+`jit` engine, not the hardware.
+  On a **GPU** the `vmap` lanes run in parallel, so wall-time stays ~flat as the batch grows →
+  env-steps/s scales with batch size and the device saturates; the CPU ~700×+ is the floor, not the ceiling.
 - **Learning ✅ (smoke)** — `tests/agent/test_jax_engine_smoke.py`: PPO trains end-to-end on the JAX env
   with finite losses (a full learning curve is the next run).
 
