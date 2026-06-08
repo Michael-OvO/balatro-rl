@@ -103,14 +103,42 @@ Install once on the pod: `pip install trackio wandb`.
   reward / success_rate / GPU-util to wandb.
 - Console is always live: `tail -f /workspace/grpo_8b.log`, `tail -f /workspace/<sweep>/run_*/train.log`.
 
-## 8. Co-existence + the throughput reality (measured 2026-06-06)
-- **JAX is CPU-only on this pod** (no `jaxlib-cuda`) → the E5 PPO uses **zero GPU**; the 8B gets the
-  whole H100. Run PPO as a **parallel sweep** (`scripts/ppo_sweep.sh`) — a single run is serial-Python
-  (`SyncVectorEnv` loops envs), ~72 s/update, so cores help only via *more concurrent runs*.
-- **Agentic GPU util is bursty/low (~0–20%, peaks ~87%)** — each turn generates a tiny action then
-  waits on CPU env-steps. Not a bug; agentic RL is rollout-bound. Saturating the GPU would need a
-  JAX-vectorized engine (a rewrite), not a flag.
-- **Right-size or it runs for weeks.** Measured: a GiGPO step (128 eps × 350 turns) is >30 min →
-  600 steps ≈ 2 weeks. For a real first run use `EPOCHS≈8` (~32 steps) + `MAX_STEPS≈150`; PPO needs
-  ~150 warm-started updates (not 2000). The 8B + a PPO sweep contend for CPU — fewer PPO runs
-  speed the 8B's rollout.
+## 8. The throughput reality — UPDATED for the E7 JAX core engine (2026-06-07)
+
+**The old bottleneck (measured 2026-06-06):** every track funnelled through the pure-Python,
+object-based engine. A single E5 PPO run was serial-Python (`SyncVectorEnv` loops `BalatroEnv`),
+~72 s/update at 64 envs × 128 steps ≈ **~114 env-steps/s** with **zero GPU**; the 8B agentic run was
+rollout-bound (GPU ~0–20 %, peaks ~87 %) waiting on CPU env-steps. No flag fixed it — the env had to
+move onto the GPU.
+
+**The fix (E7):** a GPU-native, branchless, `vmap`-able JAX core engine (`balatro_rl/engine_jax/`),
+proven bit-for-bit equal to the Python oracle on the core loop and dropped under PPO via
+`JaxVectorEnv` (a `SyncVectorEnv`-compatible drop-in; flip with `TrainConfig.engine="jax"`).
+
+**Phase-1 results (the go/no-go):**
+- **Parity ✅** — `tests/engine_jax/test_core_parity_gate.py`: **1000** (seed × random-legal-action)
+  rollouts to termination agree with the Python engine on every within-blind transition
+  (scalars + ordered hand slots + the full core observation + the shaped reward) — **12,147
+  within-blind transitions + 1,914 blind boundaries, zero mismatches**. (A 200-rollout subset runs by
+  default in CI; the 1000-rollout gate is `@pytest.mark.slow`, opt in with `BALATRO_RUN_SLOW=1`.)
+- **Throughput** (`scripts/bench_jax_engine.py`, **CPU M4**, 200-step `lax.scan` over `batched_step`):
+  ~**85,600 env-steps/s @ 1k envs**, ~**90,800 @ 10k envs** → **~800× the old ~114 env-steps/s
+  Python pace, CPU-to-CPU**. On CPU the batch serializes across a few cores so wall-time scales ~linearly
+  (throughput ≈ flat); on a GPU the `vmap` lanes run in parallel, so throughput scales with batch size
+  and the device saturates. The ~800× is the floor.
+- **Learning ✅ (smoke)** — `tests/agent/test_jax_engine_smoke.py`: PPO trains end-to-end on the JAX env
+  with finite losses (a full learning curve is the next run).
+
+**Still to run on a CUDA box** (criterion #2's GPU number — the pod was shut down to halt spend):
+`BENCH_SIZES=1000,10000,50000 python scripts/bench_jax_engine.py` to record env-steps/s **and**
+`nvidia-smi` GPU utilization (target ≥ ~80 % at ≥10k envs). The script auto-prints `nvidia-smi` when a
+CUDA device is present. Install `jaxlib-cuda` on the box first (the pod historically shipped CPU jaxlib).
+
+**Scope note:** Phase 1 is the CORE loop only (deal → play/discard → score → blind/ante → win/lose).
+Jokers/shop/consumables/vouchers/bosses are Phase 2+; the Python engine remains the oracle and the home
+of those features. The agentic-LLM track plugs into the same batched engine from Phase 1 onward.
+
+**Legacy 8B/PPO-sweep guidance (still valid for the Python-engine path):** right-size or it runs for
+weeks — a GiGPO step (128 eps × 350 turns) is >30 min → 600 steps ≈ 2 weeks; use `EPOCHS≈8` (~32 steps)
++ `MAX_STEPS≈150`, and ~150 warm-started PPO updates (not 2000). Run Python-engine PPO as a parallel
+sweep (`scripts/ppo_sweep.sh`); the JAX engine makes that sweep obsolete once the GPU number is confirmed.
