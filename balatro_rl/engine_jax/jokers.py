@@ -99,6 +99,58 @@ def _set(table, jid, fn):
     table[_dense_np[jid]] = fn
 
 
+# --- independent-branch factories ----------------------------------------------
+def _indep_flag_add(getter, dchips=0, dmult=0.0):
+    """+chips/+mult when the IndepCtx predicate holds."""
+    def fn(c): return (jnp.where(getter(c), jnp.int32(dchips), I0),
+                       jnp.where(getter(c), jnp.float32(dmult), F0), F1)
+    return fn
+
+
+def _indep_flag_xmult(getter, x):
+    """xmult when the IndepCtx predicate holds."""
+    def fn(c): return (I0, F0, jnp.where(getter(c), jnp.float32(x), F1))
+    return fn
+
+
+# --- independent branches (Task 2.3) -------------------------------------------
+# flat
+_set(INDEP_BRANCHES, 1, lambda c: (I0, jnp.float32(4.0), F1))                  # Joker +4 mult
+# hand-contains +mult
+_set(INDEP_BRANCHES, 6, _indep_flag_add(lambda c: c.contains_pair, dmult=8))   # Jolly
+_set(INDEP_BRANCHES, 7, _indep_flag_add(lambda c: c.contains_trip, dmult=12))  # Zany
+_set(INDEP_BRANCHES, 8, _indep_flag_add(lambda c: c.contains_two_pair, dmult=10))  # Mad
+_set(INDEP_BRANCHES, 9, _indep_flag_add(lambda c: c.contains_straight, dmult=12)) # Crazy
+_set(INDEP_BRANCHES, 10, _indep_flag_add(lambda c: c.contains_flush, dmult=10))  # Droll
+# hand-contains +chips
+_set(INDEP_BRANCHES, 11, _indep_flag_add(lambda c: c.contains_pair, dchips=50))   # Sly
+_set(INDEP_BRANCHES, 12, _indep_flag_add(lambda c: c.contains_trip, dchips=100))  # Wily
+_set(INDEP_BRANCHES, 13, _indep_flag_add(lambda c: c.contains_two_pair, dchips=80))  # Clever
+_set(INDEP_BRANCHES, 14, _indep_flag_add(lambda c: c.contains_straight, dchips=100)) # Devious
+_set(INDEP_BRANCHES, 15, _indep_flag_add(lambda c: c.contains_flush, dchips=80))  # Crafty
+# hand-contains xmult
+_set(INDEP_BRANCHES, 131, _indep_flag_xmult(lambda c: c.contains_pair, 2.0))     # Duo
+_set(INDEP_BRANCHES, 132, _indep_flag_xmult(lambda c: c.contains_trip, 3.0))     # Trio
+_set(INDEP_BRANCHES, 133, _indep_flag_xmult(lambda c: c.contains_quad, 4.0))     # Family
+_set(INDEP_BRANCHES, 134, _indep_flag_xmult(lambda c: c.contains_straight, 3.0)) # Order
+_set(INDEP_BRANCHES, 135, _indep_flag_xmult(lambda c: c.contains_flush, 2.0))    # Tribe
+# context-linear
+_set(INDEP_BRANCHES, 16, _indep_flag_add(lambda c: c.played_count <= 3, dmult=20))  # Half
+_set(INDEP_BRANCHES, 22, lambda c: (jnp.int32(30) * c.discards_left, F0, F1))        # Banner
+_set(INDEP_BRANCHES, 23, _indep_flag_add(lambda c: c.discards_left == 0, dmult=15))  # Mystic Summit
+_set(INDEP_BRANCHES, 34, lambda c: (I0, jnp.float32(3.0) * c.n_jokers.astype(jnp.float32), F1))  # Abstract
+_set(INDEP_BRANCHES, 17, lambda c: (I0, F0, (c.empty_slots + 1).astype(jnp.float32)))            # Stencil
+_set(INDEP_BRANCHES, 93, lambda c: (jnp.int32(2) * jnp.maximum(0, c.money), F0, F1))             # Bull
+_set(INDEP_BRANCHES, 53, lambda c: (jnp.int32(2) * c.deck_count, F0, F1))                        # Blue
+_set(INDEP_BRANCHES, 43, lambda c: (I0, (c.plays_run_ht + 1).astype(jnp.float32), F1))           # Supernova
+_set(INDEP_BRANCHES, 62, _indep_flag_xmult(lambda c: c.plays_round_ht >= 1, 3.0))                # Card Sharp
+# scoring-suit-set xmult
+_set(INDEP_BRANCHES, 128, _indep_flag_xmult(lambda c: c.has_club_and_other, 2.0))   # Seeing Double
+_set(INDEP_BRANCHES, 122, _indep_flag_xmult(lambda c: c.all_four_suits, 3.0))       # Flower Pot
+# Blackboard (independent; held aggregate)
+_set(INDEP_BRANCHES, 48, _indep_flag_xmult(lambda c: c.all_dark, 3.0))              # Blackboard
+
+
 def _contains_predicates(p_rank, p_suit, p_mask):
     """contains_* over the PLAYED cards (mirror engine.hands.contains)."""
     m = p_mask.astype(jnp.int32)

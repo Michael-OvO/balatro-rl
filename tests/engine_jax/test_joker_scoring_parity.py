@@ -4,8 +4,15 @@ import jax.numpy as jnp
 import numpy as np
 import pytest
 
+from balatro_rl.engine.cards import Card
+from balatro_rl.engine.jokers.base import JokerState
+from balatro_rl.engine.scoring import score_play
 from balatro_rl.engine_jax.jokers import score_with_jokers
 from balatro_rl.engine_jax.scoring import score_core
+
+# Compile the kernel ONCE at module load: every padded shape is static
+# ([5]/[8]/[12]/[MAX_JOKERS]), so all harness calls hit the same executable.
+_SWJ = jax.jit(score_with_jokers)
 
 
 def _empty_loadout():
@@ -18,6 +25,79 @@ def _pad5(ranks, suits):
     for i, (rk, su) in enumerate(zip(ranks, suits)):
         r[i] = rk; s[i] = su; m[i] = True
     return jnp.asarray(r), jnp.asarray(s), jnp.asarray(m)
+
+
+def _oracle(played, jokers, held=(), levels=(), money=0, discards_left=0,
+            deck_count=0, hand_plays_run=(), hand_plays_round=()):
+    js = tuple(JokerState(type=j) for j in jokers)
+    cards = [Card(rank=r, suit=s) for r, s in played]
+    heldc = [Card(rank=r, suit=s) for r, s in held]
+    return score_play(cards, js, tuple(heldc), joker_slots=5, money=money,
+                      hands_left=0, discards_left=discards_left, deck_count=deck_count,
+                      hand_plays_run=tuple(hand_plays_run), hand_plays_round=tuple(hand_plays_round),
+                      levels=tuple(levels))
+
+
+def _kernel(played, jokers, held=(), levels=None, money=0, discards_left=0,
+            deck_count=0, hand_plays_run=None, hand_plays_round=None):
+    from balatro_rl.envs.actions import MAX_JOKERS
+    pr, ps, pm = _pad5([r for r, _ in played], [s for _, s in played])
+    hr = np.zeros(8, np.int8); hs = np.zeros(8, np.int8); hm = np.zeros(8, bool)
+    for i, (r, s) in enumerate(held):
+        hr[i] = r; hs[i] = s; hm[i] = True
+    jk = np.zeros(MAX_JOKERS, np.int32)
+    for i, j in enumerate(jokers):
+        jk[i] = j
+    lv = jnp.ones(12, jnp.int32) if levels is None else jnp.asarray(levels, jnp.int32)
+    hpr = jnp.zeros(12, jnp.int32) if hand_plays_run is None else jnp.asarray(hand_plays_run, jnp.int32)
+    hpo = jnp.zeros(12, jnp.int32) if hand_plays_round is None else jnp.asarray(hand_plays_round, jnp.int32)
+    return _SWJ(pr, ps, pm, jnp.asarray(hr), jnp.asarray(hs), jnp.asarray(hm),
+                lv, jnp.asarray(jk),
+                money=jnp.int32(money), discards_left=jnp.int32(discards_left),
+                deck_count=jnp.int32(deck_count),
+                hand_plays_run=hpr, hand_plays_round=hpo)
+
+
+def _assert_match(played, jokers, **kw):
+    o = _oracle(played, jokers, **kw)
+    k = _kernel(played, jokers, **kw)
+    assert (int(o.hand_type), int(o.chips), int(round(o.mult * 1000))) == \
+           (int(k[0]), int(k[1]), int(round(float(k[2]) * 1000))), (played, jokers, kw, o, k)
+    assert o.score == int(k[3]), (played, jokers, kw, o.score, int(k[3]))
+
+
+def test_independent_batch1():
+    # JOKER +4 mult on a pair of Aces
+    _assert_match([(14,0),(14,1)], [1])
+    # Jolly +8 mult (pair) ; Sly +50 chips (pair)
+    _assert_match([(14,0),(14,1),(7,2)], [6]); _assert_match([(14,0),(14,1),(7,2)], [11])
+    # The Duo x2 (pair) ; The Trio x3 (trips)
+    _assert_match([(9,0),(9,1)], [131]); _assert_match([(9,0),(9,1),(9,2)], [132])
+    # Abstract +3 per joker (here 2 jokers -> +6) ; Banner +30 per discard
+    _assert_match([(2,0)], [34, 1]); _assert_match([(2,0)], [22], discards_left=3)
+    # Bull +2 per $ ; Blue +2 per deck card ; Half +20 if <=3 cards
+    _assert_match([(2,0)], [93], money=7); _assert_match([(2,0)], [53], deck_count=44)
+    _assert_match([(2,0),(3,0),(4,0)], [16])
+    # Mystic +15 if 0 discards ; Supernova +(plays_run+1) ; Card Sharp x3 if played this round
+    _assert_match([(2,0)], [23], discards_left=0)
+    _assert_match([(2,0),(2,1)], [43], hand_plays_run=[0,2,0,0,0,0,0,0,0,0,0,0])
+    _assert_match([(2,0),(2,1)], [62], hand_plays_round=[0,1,0,0,0,0,0,0,0,0,0,0])
+    # Joker Stencil x(empty_slots+1): 1 joker, 4 empty -> x5
+    _assert_match([(2,0)], [17])
+    # Flush jokers: Droll +10, The Tribe x2, Crafty +80
+    flush = [(2,1),(5,1),(8,1),(11,1),(13,1)]
+    _assert_match(flush, [10]); _assert_match(flush, [135]); _assert_match(flush, [15])
+    # Straight jokers: Crazy +12, The Order x3, Devious +100
+    straight = [(2,0),(3,1),(4,2),(5,3),(6,0)]
+    _assert_match(straight, [9]); _assert_match(straight, [134]); _assert_match(straight, [14])
+    # Two-pair: Mad +10, Clever +80 ; Trips: Zany +12, Wily +100 ; Quads: The Family x4
+    _assert_match([(2,0),(2,1),(3,2),(3,3)], [8]); _assert_match([(2,0),(2,1),(3,2),(3,3)], [13])
+    _assert_match([(4,0),(4,1),(4,2)], [7]); _assert_match([(4,0),(4,1),(4,2)], [12])
+    _assert_match([(4,0),(4,1),(4,2),(4,3)], [133])
+    # Seeing Double x2 (club + other) ; Flower Pot x3 (all four suits)
+    _assert_match([(2,2),(3,1)], [128]); _assert_match([(2,0),(3,1),(4,2),(5,3),(6,0)], [122])
+    # Blackboard x3 (all held spade/club) ; vacuous when none held
+    _assert_match([(2,0)], [48]); _assert_match([(2,0)], [48], held=[(9,0),(9,2)])
 
 
 def test_empty_loadout_reduces_to_score_core():
