@@ -223,3 +223,22 @@ def test_obs_parity_discard_policy():
 
     compared = _run_policy(pick, label="discard-policy")
     assert compared > 0, "no states were compared"
+
+
+def test_obs_joker_keys_match_python():
+    import numpy as np, jax.numpy as jnp
+    from balatro_rl.engine_jax.step import reset
+    from balatro_rl.engine_jax.obs import encode_core
+    from balatro_rl.envs.actions import MAX_JOKERS
+    from balatro_rl.envs.obs import encode as py_encode
+    # Build a JAX state with a loadout, and an oracle GameState with the same jokers.
+    jk = np.zeros(MAX_JOKERS, np.int32); jk[0] = 1; jk[1] = 131  # Joker, The Duo
+    ranks = [r for r in range(2,15) for _ in range(4)]; suits = [s for _ in range(2,15) for s in range(4)]
+    st = reset(ranks, suits, required=300, jokers=jk)
+    obs = encode_core(st)
+    assert int(np.asarray(obs["joker_types"])[0]) == 1
+    assert int(np.asarray(obs["joker_types"])[1]) == 131
+    assert float(np.asarray(obs["joker_mask"])[0]) == 1.0 and float(np.asarray(obs["joker_mask"])[1]) == 1.0
+    assert float(np.asarray(obs["joker_mask"])[2]) == 0.0
+    assert float(np.asarray(obs["joker_counter"])[0]) == 0.0   # stateless -> symlog(0)=0
+    assert float(np.asarray(obs["global"])[10]) == 2.0          # joker count

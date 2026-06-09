@@ -1,8 +1,11 @@
 """JAX-native observation encoder and legal mask for the core engine.
 
-``encode_core(state)`` mirrors Python ``envs.obs.encode`` field-for-field, with
-all joker / shop / consumable / pack / voucher / boss entries zeroed out (those
-systems are out of scope for the JAX core engine).
+``encode_core(state)`` mirrors Python ``envs.obs.encode`` field-for-field. The
+joker keys (``joker_types`` / ``joker_counter`` / ``joker_mask``) and the
+``global[10]`` joker count are filled from ``state.jokers`` (Phase 2; counters
+stay 0 — the loadout is stateless). All shop / consumable / pack / voucher /
+boss entries are zeroed out (those systems are out of scope for the JAX core
+engine).
 
 ``legal_mask_core(state)`` produces a bool[NUM_ACTIONS=708] mask where only the
 PLAY ids [0, 218) and DISCARD ids [218, 436) that are legal given the current
@@ -127,8 +130,10 @@ def encode_core(state: CoreState) -> dict:
     """Encode a CoreState into the OBS_SHAPES dict.
 
     Core fields (global, hand, hand_mask, levels, deck_rank_hist, deck_suit_hist)
-    are computed from ``state``.  All joker / shop / consumable / pack / voucher /
-    boss fields are zeroed to the correct shape and dtype.
+    are computed from ``state``.  Joker fields come from ``state.jokers``
+    (types + occupancy mask + count in global[10]; counters stay 0 — stateless).
+    All shop / consumable / pack / voucher / boss fields are zeroed to the
+    correct shape and dtype.
 
     The output dict has EXACTLY the same keys and shapes as ``envs.obs.OBS_SHAPES``.
     """
@@ -147,7 +152,10 @@ def encode_core(state: CoreState) -> dict:
     g = g.at[7].set(state.blind_index.astype(jnp.float32))
     # g[8] = rerolls_done = 0 (not tracked in core)
     g = g.at[9].set(state.hand_size.astype(jnp.float32))
-    # g[10] = len(jokers) = 0
+    # -- Jokers (Phase 2): types from the loadout, counter=0 (stateless), mask from occupancy.
+    jt = state.jokers.astype(jnp.int32)                       # [MAX_JOKERS]
+    jmask = (jt != 0).astype(jnp.float32)
+    g = g.at[10].set(jnp.sum(jt != 0).astype(jnp.float32))    # g[10] = #jokers
     # g[11] = len(shop_offers) = 0
     # Phase one-hot over g[12..16]: phase values 0..4 map to g[12+phase].
     # In core the engine only reaches PLAYING(0), WON(1), LOST(2); SHOP/OPEN_PACK
@@ -197,9 +205,9 @@ def encode_core(state: CoreState) -> dict:
         "global":           g,
         "hand":             hand,
         "hand_mask":        hand_mask,
-        "joker_types":      jnp.zeros(MAX_JOKERS, dtype=jnp.int32),
+        "joker_types":      jt,
         "joker_counter":    jnp.zeros(MAX_JOKERS, dtype=jnp.float32),
-        "joker_mask":       jnp.zeros(MAX_JOKERS, dtype=jnp.float32),
+        "joker_mask":       jmask,
         "shop_types":       jnp.zeros(MAX_SHOP, dtype=jnp.int32),
         "shop_consum":      jnp.zeros(MAX_SHOP, dtype=jnp.int32),
         "shop_cost":        jnp.zeros(MAX_SHOP, dtype=jnp.float32),
