@@ -49,10 +49,15 @@ class JaxVectorEnv:
         base_seed:    Integer seed for the initial PRNG keys.
         req_scale:    Curriculum scale for required blind scores (1.0 = real game).
         enable_bosses: Must be False — the JAX core has no boss system.
+        joker_loadout: Optional list of joker ids held by EVERY env for the whole
+                      run (constant — acquisition is Phase 3).  0-padded to
+                      ``MAX_JOKERS`` slots.  ``None`` / empty = no jokers
+                      (Phase-1 behavior, unchanged).
 
     Raises:
         ValueError: if ``enable_bosses=True`` (not implemented in the core).
         ValueError: if ``reward_name`` is not ``"shaped"``.
+        ValueError: if ``joker_loadout`` has more than ``MAX_JOKERS`` entries.
     """
 
     def __init__(
@@ -62,6 +67,7 @@ class JaxVectorEnv:
         base_seed: int = 0,
         req_scale: float = 1.0,
         enable_bosses: bool = False,
+        joker_loadout=None,
     ):
         if enable_bosses:
             raise ValueError(
@@ -79,6 +85,21 @@ class JaxVectorEnv:
         self._base_seed = base_seed
         self._req_scale = req_scale
         self._boss_rate_warned = False
+        self.joker_loadout = list(joker_loadout) if joker_loadout else []
+        if len(self.joker_loadout) > MAX_JOKERS:
+            raise ValueError(
+                f"JaxVectorEnv: joker_loadout has {len(self.joker_loadout)} ids "
+                f"but only {MAX_JOKERS} slots exist."
+            )
+        # Per-env loadout [N, MAX_JOKERS] int32: the fixed loadout 0-padded and
+        # broadcast to every env.  Shared by __init__ and reset() — the loadout
+        # is constant for the whole run (CoreState.jokers carries it across
+        # auto-resets inside step).  Empty loadout == Phase-1 all-zeros array.
+        row = np.zeros(MAX_JOKERS, dtype=np.int32)
+        row[: len(self.joker_loadout)] = self.joker_loadout
+        self._jokers = jnp.broadcast_to(
+            jnp.asarray(row), (num_envs, MAX_JOKERS)
+        )  # [N, MAX_JOKERS] int32
 
         # Build the required-score lookup table and seed N PRNG keys.
         self.required_table = jnp.asarray(
@@ -88,9 +109,8 @@ class JaxVectorEnv:
         base_key = jax.random.PRNGKey(base_seed)
         keys = jax.random.split(base_key, num_envs)  # [N, 2] uint32
 
-        # Initialise N environments on-device (empty joker loadout by default).
-        _zero_jk = jnp.zeros((num_envs, MAX_JOKERS), dtype=jnp.int32)
-        self.state = _jit_batched_reset(keys, self.required_table, _zero_jk)
+        # Initialise N environments on-device with the fixed loadout.
+        self.state = _jit_batched_reset(keys, self.required_table, self._jokers)
 
         # Cache obs/mask for the reset state (avoids a redundant encode on reset()).
         self._obs  = None
@@ -107,11 +127,10 @@ class JaxVectorEnv:
             obs:   dict mapping str -> jnp.ndarray with leading dim N.
             masks: bool ndarray [N, 708].
         """
-        # Re-seed and reset every env.
+        # Re-seed and reset every env (same fixed loadout as construction).
         base_key = jax.random.PRNGKey(self._base_seed)
         keys = jax.random.split(base_key, self.num_envs)
-        _zero_jk = jnp.zeros((self.num_envs, MAX_JOKERS), dtype=jnp.int32)
-        self.state = _jit_batched_reset(keys, self.required_table, _zero_jk)
+        self.state = _jit_batched_reset(keys, self.required_table, self._jokers)
 
         self._obs  = _vmapped_encode(self.state)
         self._mask = np.asarray(_vmapped_legal(self.state), dtype=bool)
