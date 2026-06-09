@@ -100,6 +100,29 @@ def test_independent_batch1():
     _assert_match([(2,0)], [48]); _assert_match([(2,0)], [48], held=[(9,0),(9,2)])
 
 
+def test_on_score_batch2():
+    # suit +mult: Greedy(♦+3), Lusty(♥+3), Wrathful(♠+3), Gluttonous(♣+3), Onyx(♣+7)
+    _assert_match([(5,3),(7,3)], [2]); _assert_match([(5,1),(7,1)], [3])
+    _assert_match([(5,0),(7,0)], [4]); _assert_match([(5,2),(7,2)], [5]); _assert_match([(5,2),(7,2)], [119])
+    # suit +chips: Arrowhead(♠+50)
+    _assert_match([(5,0),(7,0)], [118])
+    # face: Scary +30 chips, Smiley +5 mult (on K/Q)
+    _assert_match([(13,0),(12,1)], [33]); _assert_match([(13,0),(12,1)], [104])
+    # rank: Fibonacci, Even Steven, Odd Todd, Scholar, Walkie Talkie
+    _assert_match([(2,0),(3,1)], [31]); _assert_match([(2,0),(4,1)], [39])
+    _assert_match([(3,0),(5,1)], [40]); _assert_match([(14,0),(14,1)], [41]); _assert_match([(10,0),(4,1)], [101])
+    # Photograph x2 on first scoring face only (two faces -> still single x2)
+    _assert_match([(13,0),(12,1)], [78])
+    # Hack retriggers 2-5 (each adds its rank chips again); pair to make them score
+    _assert_match([(3,0),(3,1)], [36])
+    # Sock & Buskin retriggers faces; pair of Kings
+    _assert_match([(13,0),(13,1)], [109])
+    # Photograph + Sock&Buskin: first-face card retriggered -> x2 applies twice
+    _assert_match([(13,0),(13,1)], [78, 109])
+    # ordering: [The Duo x2, Joker +4] vs [Joker +4, The Duo x2] differ; both match oracle
+    _assert_match([(14,0),(14,1)], [131, 1]); _assert_match([(14,0),(14,1)], [1, 131])
+
+
 def test_empty_loadout_reduces_to_score_core():
     """With no jokers, score_with_jokers == score_core for random plain hands."""
     rng = np.random.default_rng(0)

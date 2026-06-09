@@ -113,6 +113,58 @@ def _indep_flag_xmult(getter, x):
     return fn
 
 
+# --- on_score branch factories ---------------------------------------------------
+def _score_suit(suit_id, dchips=0, dmult=0.0):
+    """+chips/+mult when the scored card matches the suit."""
+    def fn(r, s, f, ff):
+        hit = (s == suit_id)
+        return (jnp.where(hit, jnp.int32(dchips), I0),
+                jnp.where(hit, jnp.float32(dmult), F0), F1)
+    return fn
+
+
+def _score_face(dchips=0, dmult=0.0):
+    """+chips/+mult when the scored card is a face (incl. Pareidolia)."""
+    def fn(r, s, f, ff):
+        return (jnp.where(f, jnp.int32(dchips), I0),
+                jnp.where(f, jnp.float32(dmult), F0), F1)
+    return fn
+
+
+def _score_rank_in(ranks, dchips=0, dmult=0.0):
+    """+chips/+mult when the scored card's rank is in the set."""
+    rset = jnp.asarray(ranks, jnp.int32)
+    def fn(r, s, f, ff):
+        hit = jnp.any(r == rset)
+        return (jnp.where(hit, jnp.int32(dchips), I0),
+                jnp.where(hit, jnp.float32(dmult), F0), F1)
+    return fn
+
+
+# --- on_score branches (Task 2.4) ------------------------------------------------
+# suit
+_set(ON_SCORE_BRANCHES, 2, _score_suit(3, dmult=3))      # Greedy ♦
+_set(ON_SCORE_BRANCHES, 3, _score_suit(1, dmult=3))      # Lusty ♥
+_set(ON_SCORE_BRANCHES, 4, _score_suit(0, dmult=3))      # Wrathful ♠
+_set(ON_SCORE_BRANCHES, 5, _score_suit(2, dmult=3))      # Gluttonous ♣
+_set(ON_SCORE_BRANCHES, 119, _score_suit(2, dmult=7))    # Onyx Agate ♣
+_set(ON_SCORE_BRANCHES, 118, _score_suit(0, dchips=50))  # Arrowhead ♠
+# face
+_set(ON_SCORE_BRANCHES, 33, _score_face(dchips=30))      # Scary Face
+_set(ON_SCORE_BRANCHES, 104, _score_face(dmult=5))       # Smiley Face
+_set(ON_SCORE_BRANCHES, 78, lambda r, s, f, ff: (I0, F0, jnp.where(ff, jnp.float32(2.0), F1)))  # Photograph x2 first face
+# rank
+_set(ON_SCORE_BRANCHES, 31, _score_rank_in([14, 2, 3, 5, 8], dmult=8))     # Fibonacci
+_set(ON_SCORE_BRANCHES, 39, _score_rank_in([2, 4, 6, 8, 10], dmult=4))     # Even Steven
+_set(ON_SCORE_BRANCHES, 40, _score_rank_in([3, 5, 7, 9, 14], dchips=31))   # Odd Todd
+_set(ON_SCORE_BRANCHES, 41, _score_rank_in([14], dchips=20, dmult=4))      # Scholar
+_set(ON_SCORE_BRANCHES, 101, _score_rank_in([10, 4], dchips=10, dmult=4))  # Walkie Talkie
+
+# --- retrigger branches (Task 2.4) -----------------------------------------------
+_set(RETRIG_BRANCHES, 36, lambda r, s, f: jnp.where(jnp.any(r == jnp.array([2, 3, 4, 5], jnp.int32)), jnp.int32(1), I0))  # Hack
+_set(RETRIG_BRANCHES, 109, lambda r, s, f: jnp.where(f, jnp.int32(1), I0))  # Sock & Buskin
+
+
 # --- independent branches (Task 2.3) -------------------------------------------
 # flat
 _set(INDEP_BRANCHES, 1, lambda c: (I0, jnp.float32(4.0), F1))                  # Joker +4 mult
