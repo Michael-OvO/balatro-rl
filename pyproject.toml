@@ -22,3 +22,6 @@ packages = ["balatro_rl"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
+markers = [
+    "slow: long-running tests (e.g. the 1000-rollout parity gate); opt in with BALATRO_RUN_SLOW=1",
+]
