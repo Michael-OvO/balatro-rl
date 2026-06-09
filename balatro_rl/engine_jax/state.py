@@ -10,6 +10,7 @@ from typing import NamedTuple
 import jax.numpy as jnp
 
 from balatro_rl.engine_jax.config import MAX_HAND, N_HAND_TYPES
+from balatro_rl.envs.actions import MAX_JOKERS
 
 # Full standard deck size (never changes).
 DECK_SIZE: int = 52
@@ -58,6 +59,9 @@ class CoreState(NamedTuple):
     # -- RNG state -------------------------------------------------------------
     rng: jnp.ndarray                # uint32[2] JAX PRNG key
 
+    # -- Jokers (fixed per-episode loadout; acquisition is Phase 3) ------------
+    jokers: jnp.ndarray             # int32[MAX_JOKERS]  JokerType id per slot, 0 = empty
+
 
 def zeros_state() -> CoreState:
     """Return a ``CoreState`` with all fields zeroed to their correct dtype/shape.
@@ -94,4 +98,6 @@ def zeros_state() -> CoreState:
         won=jnp.zeros((), dtype=bool),
 
         rng=jnp.zeros((2,), dtype=jnp.uint32),
+
+        jokers=jnp.zeros((MAX_JOKERS,), dtype=jnp.int32),
     )

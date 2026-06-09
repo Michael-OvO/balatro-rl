@@ -16,12 +16,17 @@ import numpy as np
 import jax
 import jax.numpy as jnp
 
-from balatro_rl.envs.actions import _SUBSETS, decode as py_decode, PLAY_N
+from balatro_rl.envs.actions import _SUBSETS, decode as py_decode, PLAY_N, MAX_JOKERS
 from balatro_rl.engine_jax import step as J
 from balatro_rl.engine_jax.obs import encode_core, legal_mask_core
 from balatro_rl.engine_jax.config import Phase, Verb, HANDS_PER_BLIND, DISCARDS_PER_BLIND, MAX_HAND
 from balatro_rl.engine_jax.rewards import shaped_core
 from tests.engine_jax.parity_util import build_required_table
+
+
+def _zero_jokers(n: int) -> jnp.ndarray:
+    """Return a zeros int32[n, MAX_JOKERS] joker loadout (empty, Phase-1 compatible)."""
+    return jnp.zeros((n, MAX_JOKERS), dtype=jnp.int32)
 
 
 # ---------------------------------------------------------------------------
@@ -176,7 +181,7 @@ def test_batched_reset_shape():
     """batched_reset over N=1024 keys -> CoreState with leading dim 1024."""
     keys = _make_keys(N)
     req_table = _default_required_table()
-    states = J.batched_reset(keys, req_table)
+    states = J.batched_reset(keys, req_table, _zero_jokers(N))
 
     assert states.deck_rank.shape == (N, 52)
     assert states.hand_rank.shape == (N, MAX_HAND)
@@ -191,7 +196,7 @@ def test_batched_reset_jit():
     keys = _make_keys(N)
     req_table = _default_required_table()
     jit_reset = jax.jit(J.batched_reset)
-    states = jit_reset(keys, req_table)
+    states = jit_reset(keys, req_table, _zero_jokers(N))
     assert states.ante.shape == (N,)
 
 
@@ -199,7 +204,7 @@ def test_batched_reset_obs_shape():
     """vmapped encode_core over batched state -> obs dict each value leading dim N."""
     keys = _make_keys(N)
     req_table = _default_required_table()
-    states = J.batched_reset(keys, req_table)
+    states = J.batched_reset(keys, req_table, _zero_jokers(N))
     batch_encode = jax.vmap(encode_core)
     obs = batch_encode(states)
     for k, v in obs.items():
@@ -245,7 +250,7 @@ def test_batched_step_shape():
     """jit(batched_step) over N envs: outputs have leading dim N."""
     keys = _make_keys(N)
     req_table = _default_required_table()
-    states = J.batched_reset(keys, req_table)
+    states = J.batched_reset(keys, req_table, _zero_jokers(N))
 
     # Use action 0 (PLAY first card) for all envs
     action_ids = jnp.zeros(N, dtype=jnp.int32)
@@ -274,7 +279,7 @@ def test_batched_step_vmap_consistency():
     N_CHECK = 8
     keys = _make_keys(N_CHECK, seed=7)
     req_table = _default_required_table()
-    states = J.batched_reset(keys, req_table)
+    states = J.batched_reset(keys, req_table, _zero_jokers(N_CHECK))
 
     # Mix of action types:
     #   lanes 0..1:  single-card PLAY  (ids 0, 1)
@@ -480,7 +485,7 @@ def test_auto_reset_in_batched_step():
     N_SMALL = 4
     keys = _make_keys(N_SMALL, seed=55)
     req_table = _default_required_table()
-    states = J.batched_reset(keys, req_table)
+    states = J.batched_reset(keys, req_table, _zero_jokers(N_SMALL))
 
     # Force lane 0 to done by consuming all hands_left via step (underlying, no auto-reset)
     lane0 = jax.tree_util.tree_map(lambda x: x[0], states)
@@ -522,10 +527,26 @@ def test_batched_step_large_n_jit():
     """Full N=1024 batched step under jit: smoke test."""
     keys = _make_keys(N)
     req_table = _default_required_table()
-    states = jax.jit(J.batched_reset)(keys, req_table)
+    states = jax.jit(J.batched_reset)(keys, req_table, _zero_jokers(N))
     action_ids = jnp.zeros(N, dtype=jnp.int32)
     next_states, rewards, dones, signals = jax.jit(J.batched_step)(states, action_ids)
     assert next_states.ante.shape == (N,)
     assert rewards.shape == (N,)
     assert dones.shape == (N,)
     assert signals.score.shape == (N,)
+
+
+def test_batched_reset_accepts_jokers_and_empty_is_phase1():
+    import jax, jax.numpy as jnp
+    from balatro_rl.engine_jax.step import batched_reset, reset_jax
+    from balatro_rl.engine_jax.curriculum import build_required_table
+    from balatro_rl.envs.actions import MAX_JOKERS
+    n = 4
+    keys = jax.random.split(jax.random.PRNGKey(0), n)
+    rt = build_required_table(1.0)
+    jk = jnp.zeros((n, MAX_JOKERS), dtype=jnp.int32)
+    st = batched_reset(keys, rt, jk)
+    assert st.jokers.shape == (n, MAX_JOKERS)
+    # Single-env reset_jax with default jokers matches the all-zero loadout.
+    s0 = reset_jax(keys[0], rt)
+    assert int(jnp.sum(s0.jokers)) == 0

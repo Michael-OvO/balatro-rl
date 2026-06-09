@@ -30,6 +30,7 @@ import jax.numpy as jnp
 from balatro_rl.engine_jax.curriculum import build_required_table
 from balatro_rl.engine_jax.step import batched_reset, batched_step
 from balatro_rl.engine_jax.obs import encode_core, legal_mask_core
+from balatro_rl.envs.actions import MAX_JOKERS
 
 # vmap wrappers for obs + mask encoding over a batched CoreState.
 _vmapped_encode    = jax.jit(jax.vmap(encode_core))
@@ -87,8 +88,9 @@ class JaxVectorEnv:
         base_key = jax.random.PRNGKey(base_seed)
         keys = jax.random.split(base_key, num_envs)  # [N, 2] uint32
 
-        # Initialise N environments on-device.
-        self.state = _jit_batched_reset(keys, self.required_table)
+        # Initialise N environments on-device (empty joker loadout by default).
+        _zero_jk = jnp.zeros((num_envs, MAX_JOKERS), dtype=jnp.int32)
+        self.state = _jit_batched_reset(keys, self.required_table, _zero_jk)
 
         # Cache obs/mask for the reset state (avoids a redundant encode on reset()).
         self._obs  = None
@@ -108,7 +110,8 @@ class JaxVectorEnv:
         # Re-seed and reset every env.
         base_key = jax.random.PRNGKey(self._base_seed)
         keys = jax.random.split(base_key, self.num_envs)
-        self.state = _jit_batched_reset(keys, self.required_table)
+        _zero_jk = jnp.zeros((self.num_envs, MAX_JOKERS), dtype=jnp.int32)
+        self.state = _jit_batched_reset(keys, self.required_table, _zero_jk)
 
         self._obs  = _vmapped_encode(self.state)
         self._mask = np.asarray(_vmapped_legal(self.state), dtype=bool)

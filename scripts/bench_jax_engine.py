@@ -33,6 +33,7 @@ import jax.numpy as jnp
 from balatro_rl.engine_jax.curriculum import build_required_table
 from balatro_rl.engine_jax.obs import legal_mask_core
 from balatro_rl.engine_jax.step import batched_reset, batched_step
+from balatro_rl.envs.actions import MAX_JOKERS
 
 
 def _sizes() -> list[int]:
@@ -123,7 +124,8 @@ def main() -> None:
 
     for n in sizes:
         keys = jax.random.split(jax.random.PRNGKey(0), n)
-        state = batched_reset(keys, req_table)
+        zero_jk = jnp.zeros((n, MAX_JOKERS), dtype=jnp.int32)  # Phase-2 empty loadout
+        state = batched_reset(keys, req_table, zero_jk)
         jax.block_until_ready(state)
         rollout = _make_rollout(num_steps)
 
