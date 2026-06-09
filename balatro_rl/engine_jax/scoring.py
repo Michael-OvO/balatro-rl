@@ -152,7 +152,7 @@ def _card_chip(ranks) -> jnp.ndarray:
     return chip.astype(jnp.int32)
 
 
-def _scoring_mask(ht, ranks, suits, m):
+def _scoring_mask(ht, ranks, m):
     """The per-hand-type scoring-card mask (bool[5]) matching evaluate()'s scoring_idx.
     `ht` is the detected hand type; `m` is the played bool[5] mask."""
     ranks = jnp.asarray(ranks).astype(jnp.int32)
@@ -224,7 +224,7 @@ def score_core(ranks, suits, mask, levels):
     mult = HAND_BASE_MULT[ht] + HAND_INC_MULT[ht] * (lvl - 1)
 
     # --- scoring mask per hand-type category (mirror evaluate's scoring_idx) -
-    scoring_mask = _scoring_mask(ht, ranks, suits, m)
+    scoring_mask = _scoring_mask(ht, ranks, m)
 
     # --- sum the chip value of the scoring cards ----------------------------
     card_chips = _card_chip(ranks)

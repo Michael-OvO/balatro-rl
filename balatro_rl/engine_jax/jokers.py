@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import jax
 import jax.numpy as jnp
+import numpy as _np
 from jax import lax
 from typing import NamedTuple
 
@@ -23,7 +24,7 @@ from balatro_rl.envs.actions import MAX_JOKERS
 F0 = jnp.float32(0.0)
 F1 = jnp.float32(1.0)
 I0 = jnp.int32(0)
-JOKER_SLOTS = 5  # real cap; empty_joker_slots = JOKER_SLOTS - n_jokers
+JOKER_SLOTS = MAX_JOKERS - 1  # real cap (Antimatter +1 slot excluded); empty_joker_slots = JOKER_SLOTS - n_jokers
 
 # --- in-scope JokerType ids (== engine.jokers.base.JokerType values) ----------
 # Dense index 0 is the no-op; in-scope ids get dense indices 1..N in THIS order.
@@ -47,7 +48,6 @@ SPLASH_ID = 52
 PAREIDOLIA_ID = 37
 
 _MAX_ID = max(INSCOPE_IDS) + 1
-import numpy as _np
 _dense_np = _np.zeros(_MAX_ID, dtype=_np.int32)
 for _d, _jid in enumerate(INSCOPE_IDS, start=1):
     _dense_np[_jid] = _d
@@ -138,7 +138,7 @@ def score_with_jokers(p_rank, p_suit, p_mask, h_rank, h_suit, h_mask, levels, jo
     splash = jnp.any(jokers == SPLASH_ID)
     all_face = jnp.any(jokers == PAREIDOLIA_ID)
 
-    base_sm = _scoring_mask(ht, p_rank, p_suit, p_mask)
+    base_sm = _scoring_mask(ht, p_rank, p_mask)
     scoring_mask = jnp.where(splash, p_mask, base_sm)
 
     lvl = levels[ht]

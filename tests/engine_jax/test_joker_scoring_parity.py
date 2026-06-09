@@ -26,22 +26,20 @@ def test_empty_loadout_reduces_to_score_core():
     h_r = jnp.zeros(8, jnp.int8); h_s = jnp.zeros(8, jnp.int8); h_m = jnp.zeros(8, bool)
     levels = jnp.ones(12, jnp.int32)
     jk = _empty_loadout()
+    swj = jax.jit(score_with_jokers)  # compile once; shapes are static across iterations
     for _ in range(300):
         n = rng.integers(1, 6)
         ranks = rng.integers(2, 15, size=n); suits = rng.integers(0, 4, size=n)
         pr, ps, pm = _pad5(ranks, suits)
         ht0, c0, m0, sc0 = score_core(pr, ps, pm, levels)
-        ht1, c1, m1, sc1 = score_with_jokers(
-            pr, ps, pm, h_r, h_s, h_m, levels, jk,
-            money=jnp.int32(0), discards_left=jnp.int32(0), deck_count=jnp.int32(0),
-            hand_plays_run=jnp.zeros(12, jnp.int32), hand_plays_round=jnp.zeros(12, jnp.int32))
+        ht1, c1, m1, sc1 = swj(pr, ps, pm, h_r, h_s, h_m, levels, jk,
+                               money=jnp.int32(0), discards_left=jnp.int32(0), deck_count=jnp.int32(0),
+                               hand_plays_run=jnp.zeros(12, jnp.int32), hand_plays_round=jnp.zeros(12, jnp.int32))
         assert (int(ht0), int(c0), int(sc0)) == (int(ht1), int(c1), int(sc1))
         assert int(sc1) == int(jnp.floor(c1.astype(jnp.float32) * m1))
 
 
 def test_score_with_jokers_jit_vmap_batches():
-    import jax
-    jf = jax.jit(lambda *a, **k: score_with_jokers(*a, **k))
     # build a tiny batch of 3 plain hands, empty loadout
     pr = jnp.array([[14,14,5,0,0],[2,3,4,5,6],[10,10,10,2,2]], jnp.int32)
     ps = jnp.array([[0,1,2,0,0],[0,0,0,0,0],[0,1,2,3,0]], jnp.int32)
