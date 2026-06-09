@@ -4,12 +4,14 @@ This module implements the complete within-blind transition and batched env
 adapter for the JAX core engine:
 
   - ``reset(deck_rank, deck_suit, required, ...)`` — host-seeded reset (parity).
-  - ``reset_jax(key, required_table) -> CoreState`` — self-shuffling JAX-native reset.
+  - ``reset_jax(key, required_table, jokers=None) -> CoreState`` — self-shuffling
+    JAX-native reset.
   - ``decode_action(action_id) -> (verb, sel_mask bool[8])`` — branchless flat-id decoder.
   - ``step(state, verb, sel_mask) -> (CoreState, StepSignals)`` — within-blind transition.
   - ``step_with_action(state, action_id) -> (CoreState, reward, done, StepSignals)`` —
     decodes + steps + computes shaped reward on the TERMINAL next-state + auto-resets.
-  - ``batched_reset = jax.vmap(reset_jax, in_axes=(0, None))`` — N-env parallel reset.
+  - ``batched_reset = jax.vmap(reset_jax, in_axes=(0, None, 0))`` — N-env parallel
+    reset with per-env joker loadouts.
   - ``batched_step  = jax.vmap(step_with_action)`` — N-env parallel step.
 
 The reward is computed from the TERMINAL next-state (before auto-reset), ensuring
@@ -47,7 +49,7 @@ NUM_ACTIONS_JAX = NUM_ACTIONS
 # ---------------------------------------------------------------------------
 # Import _SUBSETS from the Python actions module.  This is a module-level
 # constant (list of tuples), never traced by JAX.
-from balatro_rl.envs.actions import _SUBSETS as _PY_SUBSETS  # noqa: E402
+from balatro_rl.envs.actions import MAX_JOKERS, _SUBSETS as _PY_SUBSETS  # noqa: E402
 
 _N_SUBSETS: int = len(_PY_SUBSETS)  # 218
 
@@ -141,6 +143,9 @@ def reset(
         Curriculum scale parameter (not used here; kept for API symmetry with
         Python's ``reset(seed, scale, ...)``.  The host computes ``required``
         externally, so this value does not affect state.
+    jokers:
+        Optional int32[MAX_JOKERS] fixed per-episode joker loadout. ``None`` →
+        all-zero array (empty loadout, equivalent to Phase-1 behaviour).
 
     Returns
     -------
@@ -148,7 +153,6 @@ def reset(
         Fully initialised game state for ante=1, small blind, opening hand
         already dealt.
     """
-    from balatro_rl.envs.actions import MAX_JOKERS
     jk = (jnp.zeros((MAX_JOKERS,), dtype=jnp.int32) if jokers is None
           else jnp.asarray(jokers, dtype=jnp.int32))
 
@@ -496,8 +500,7 @@ def reset_jax(key: jnp.ndarray, required_table: jnp.ndarray, jokers=None) -> Cor
     CoreState
         Fresh episode: ante=1, small blind, opening hand dealt, all counters reset.
     """
-    from balatro_rl.envs.actions import MAX_JOKERS as _MAX_JOKERS
-    jk = (jnp.zeros((_MAX_JOKERS,), dtype=jnp.int32) if jokers is None
+    jk = (jnp.zeros((MAX_JOKERS,), dtype=jnp.int32) if jokers is None
           else jnp.asarray(jokers, dtype=jnp.int32))
 
     # Split key: sub is used for the shuffle; key2 is stored as state.rng.

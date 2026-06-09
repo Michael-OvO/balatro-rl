@@ -200,6 +200,30 @@ def test_batched_reset_jit():
     assert states.ante.shape == (N,)
 
 
+def test_reset_jax_nonzero_loadout_stored_verbatim():
+    """reset_jax stores a non-zero joker loadout verbatim; batched_reset maps
+    per-env loadouts (in_axes=(0, None, 0) is per-env, not broadcast)."""
+    req_table = _default_required_table()
+
+    # Single env: non-zero loadout stored verbatim.
+    loadout = jnp.array([1, 131, 0, 0, 0, 0], dtype=jnp.int32)
+    assert loadout.shape == (MAX_JOKERS,)
+    state = J.reset_jax(jax.random.PRNGKey(3), req_table, loadout)
+    assert jnp.array_equal(state.jokers, loadout)
+
+    # Batched: per-env DISTINCT loadouts each stored at the matching env index.
+    n = 4
+    loadouts = jnp.stack([
+        jnp.array([1, 131, 0, 0, 0, 0], dtype=jnp.int32),
+        jnp.array([2, 0, 0, 0, 0, 0], dtype=jnp.int32),
+        jnp.array([0, 0, 0, 0, 0, 7], dtype=jnp.int32),
+        jnp.array([3, 4, 5, 0, 0, 0], dtype=jnp.int32),
+    ])
+    states = J.batched_reset(_make_keys(n), req_table, loadouts)
+    assert states.jokers.shape == (n, MAX_JOKERS)
+    assert jnp.array_equal(states.jokers, loadouts)
+
+
 def test_batched_reset_obs_shape():
     """vmapped encode_core over batched state -> obs dict each value leading dim N."""
     keys = _make_keys(N)
