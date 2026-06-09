@@ -1,8 +1,15 @@
 # E7: JAX-Native GPU-Vectorized Balatro Engine — Design
 
-**Status:** design (approved direction; pre-plan)
-**Date:** 2026-06-06
+**Status:** **Phase 0 + Phase 1 SHIPPED** (merged via PR #32, parity-gated); Phases 2–4 pending. Original status: design (approved direction).
+**Date:** 2026-06-06 (Phase 1 landed 2026-06-09)
 **Supersedes the efficiency assumptions in:** `docs/RUNPOD_M2.md` §8, memory `efficiency-wall-python-engine`
+
+> **Phase-1 outcome (2026-06-09):** the JAX *core* engine is built and **bit-for-bit parity-gated** against
+> the Python oracle (1000-rollout gate green) and a PPO learning smoke passes — success criteria **#1
+> (parity) ✅** and **#3 (learning) ✅**. Criterion **#2 (≥10k envs, GPU ≥80 %, ≫100×) is still pending GPU
+> validation** — measured only on CPU so far (engine alone ~191k env-steps/s; full PPO is net-bound on CPU).
+> The engine is **core-only** (no jokers/shop/consumables/bosses); the Python engine stays the full game +
+> oracle + default trainer. Next: Phase 2 (jokers + consumables).
 
 ## 1. Problem
 
@@ -75,6 +82,17 @@ on the host once per seed** (deterministic), feed it to both engines, then drive
 action sequence and compare deterministic transitions. (Avoids matching two different PRNG streams.)
 In-engine randomness after reset (e.g. future pack contents) is deferred to the phases that add it,
 each with its own parity strategy.
+
+**Cross-blind parity strategy (implemented in Phase 1).** Within-blind transitions are directly
+comparable (same host-seeded deck + same action sequence). At each blind **clear**, the Python engine
+enters the SHOP (RNG- and economy-divergent) and reshuffles, while the JAX core advances straight to the
+next blind. The parity harness bridges this: it walks Python through shop→PLAYING **buying nothing**,
+asserts the new-blind **scalars** match (ante / blind_index / required / hands_left / discards_left), then
+**re-syncs** the JAX deck/hand from Python's. RNG and economy diverge by design (out of JAX-core scope);
+parity is scoped to within-blind core transitions **plus** the advance scalars at each boundary. See
+`tests/engine_jax/test_core_parity_gate.py` (`_python_leave_shop` / `_assert_advance_scalars` /
+`_resync_jax_from_python`). The 1000-rollout gate exercised ~12,147 within-blind transitions + ~1,914
+blind boundaries with zero mismatches.
 
 ## 4. Phasing (each phase: trainable + parity-green before the next)
 

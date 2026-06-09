@@ -1,6 +1,10 @@
 # JAX-Native Balatro Engine — Phase 0 + Phase 1 Implementation Plan
 
-> **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
+> **Status — Phase 0 + Phase 1 COMPLETE (2026-06-08).** Implemented on branch `e7-jax-engine-phase01`
+> (PR #32 → master) across 19 commits (Phase 0: `31ed008`..`fd17a43`; Phase 1: `cc2add3`..`a0c5b91`).
+> ~76 `tests/engine_jax/` tests pass; the 1000-rollout parity gate and the PPO learning smoke are green.
+> Task checkboxes below are left unchecked as the historical task list — **all are done**. (Original
+> executor note: implement task-by-task with superpowers:subagent-driven-development / executing-plans.)
 
 **Goal:** A GPU-vectorizable, branchless JAX reimplementation of Balatro's CORE loop (deal → play/discard → score → blind/ante progression → win/lose; NO jokers/shop/consumables/bosses), proven bit-for-bit equal to the Python engine by a parity harness, then dropped under the PPO trainer to run thousands of games on-device.
 

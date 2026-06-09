@@ -11,6 +11,11 @@ the same per-card net kernel; all three touch the global vector).
 
 Full design + critique: workflow `wf_0e0732b9-3b7`.
 
+> **HISTORICAL (2026-06-03).** Phase D EXPOSURE and RETRAIN are now **DONE** — the full-game Python
+> engine with acquisition systems shipped to master and the agent was retrained on it (the E5 track;
+> `balatro_rl/agent/retrain.py` trains the full acquisition game). The "next build step" / "pending"
+> language below is preserved as the historical record.
+
 ## Status
 
 - **Phase A (P0 backbone)** — DONE (`dbcfed9`).
