@@ -18,11 +18,12 @@ blind (lands in SHOP / WON) we break WITHOUT asserting (the JAX clear half-state
 intentionally uncompared). The LOSS terminal IS compared (refilled hand + LOST).
 """
 import jax
+import jax.numpy as jnp
 import numpy as np
 
 from balatro_rl.engine import engine
 from balatro_rl.engine.state import Phase
-from balatro_rl.envs.actions import decode, legal_mask, PLAY_N
+from balatro_rl.envs.actions import decode, legal_mask, MAX_JOKERS, PLAY_N, _SUBSETS
 from balatro_rl.engine_jax import step as J
 from balatro_rl.engine_jax.config import MAX_HAND
 from tests.engine_jax.parity_util import (
@@ -129,21 +130,14 @@ def test_discard_policy_parity():
 
 
 def test_step_uses_jokers_loadout():
-    import jax.numpy as jnp, numpy as np
-    from balatro_rl.engine_jax.step import reset, step
-    from balatro_rl.engine_jax.config import Verb
-    from balatro_rl.envs.actions import MAX_JOKERS
     # Deterministic deck: first 8 cards are the opening hand. Make slots 0,1 a pair of Aces.
-    ranks = [14,14] + [r for r in range(2,15) for _ in range(4)][:50]
-    suits = [0,1]  + [s for _ in range(2,15) for s in range(4)][:50]
-    rt = None
+    ranks = [14, 14] + [r for r in range(2, 15) for _ in range(4)][:50]
+    suits = [0, 1] + [s for _ in range(2, 15) for s in range(4)][:50]
     jk = np.zeros(MAX_JOKERS, np.int32); jk[0] = 1  # JOKER +4 mult
-    st = reset(ranks, suits, required=10**9, required_table=rt, jokers=jk)  # huge required -> never clears
-    # PLAY the pair of Aces: subset {0,1}. Find its action id via _SUBSETS.
-    from balatro_rl.envs.actions import _SUBSETS
+    st = J.reset(ranks, suits, required=10**9, jokers=jk)  # huge required -> never clears
+    # PLAY the pair of Aces: subset {0,1}.
     aid = _SUBSETS.index((0, 1))
-    from balatro_rl.engine_jax.step import decode_action
-    verb, sel = decode_action(jnp.int32(aid))
-    ns, sig = step(st, verb, sel)
+    verb, sel = J.decode_action(jnp.int32(aid))
+    ns, sig = _JIT_STEP(st, verb, sel)
     # PAIR base 10c/2m; aces 11+11 -> 32c; Joker +4 -> mult 6 -> 192.
     assert int(sig.score) == 192
