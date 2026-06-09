@@ -175,14 +175,13 @@ def test_baron_held():
     # Baron x1.5 per held King; play a pair, hold two Kings -> x1.5*1.5
     _assert_match([(9,0),(9,1)], [72], held=[(13,0),(13,2)])
     _assert_match([(9,0),(9,1)], [72], held=[(13,0),(9,2)])   # one King
+    # TWO Barons, two held Kings -> (x1.5)^2 per King = x2.25*2.25 stacking.
+    # Well under the float32 stacked-x1.5 edge (>=~16 factors; see jokers.py Baron note).
+    _assert_match([(9,0),(9,1)], [72, 72], held=[(13,0),(13,2)])
 
 
 # --- full randomized parity over the whole in-scope set ---
-from balatro_rl.engine_jax.jokers import INSCOPE_IDS, N_INSCOPE
-
-_FIRED = set()    # dense ids observed firing across the CI corpus (coverage)
-_CI_DONE = set()  # CI seeds completed (guards the _FIRED assertion below)
-_CI_SEEDS = range(200)
+from balatro_rl.engine_jax.jokers import INSCOPE_IDS, N_INSCOPE, _dense_np
 
 
 def _random_case(rng):
@@ -194,39 +193,38 @@ def _random_case(rng):
     k = int(rng.integers(0, 6))
     jokers = [int(rng.choice(INSCOPE_IDS)) for _ in range(k)]
     levels = [int(rng.integers(1, 4)) for _ in range(12)]
-    money = int(rng.integers(0, 30)); discards = int(rng.integers(0, 4)); deck_count = int(rng.integers(0, 45))
-    hpr = [int(rng.integers(0, 4)) for _ in range(12)]; hpo = [int(rng.integers(0, 3)) for _ in range(12)]
+    money = int(rng.integers(0, 30))
+    discards = int(rng.integers(0, 4))
+    deck_count = int(rng.integers(0, 45))
+    hpr = [int(rng.integers(0, 4)) for _ in range(12)]
+    hpo = [int(rng.integers(0, 3)) for _ in range(12)]
     return dict(played=played, jokers=jokers, held=held, levels=levels, money=money,
                 discards_left=discards, deck_count=deck_count, hand_plays_run=hpr, hand_plays_round=hpo)
 
 
-@pytest.mark.parametrize("seed", _CI_SEEDS)
+@pytest.mark.parametrize("seed", range(200))
 def test_random_parity_ci(seed):
     rng = np.random.default_rng(seed)
-    case = _random_case(rng)
-    _assert_match(**case)
-    from balatro_rl.engine_jax.jokers import _dense_np
-    for j in case["jokers"]:
-        _FIRED.add(int(_dense_np[j]))
-    _CI_DONE.add(seed)
+    _assert_match(**_random_case(rng))
 
 
 def test_coverage_every_inscope_joker_appears():
-    # Drive enough cases to hit all ids; assert all in-scope ids appear in loadouts.
+    # Self-contained: run parity on each coverage-driving case AND accumulate coverage
+    # in one pass, so the assertion holds under -k / parallel / partial runs.
     rng = np.random.default_rng(12345)
-    seen = set()
+    seen_ids = set()
+    fired_dense = set()
     for _ in range(4000):
         case = _random_case(rng)
+        _assert_match(**case)               # parity on each coverage-driving case
         for j in case["jokers"]:
-            seen.add(j)
-        if len(seen) == N_INSCOPE:
+            seen_ids.add(j)
+            fired_dense.add(int(_dense_np[j]))
+        if len(seen_ids) == N_INSCOPE:
             break
-    assert set(INSCOPE_IDS) <= seen, set(INSCOPE_IDS) - seen
-    # And when the full CI sweep ran first (normal file-order run), every dense id
-    # must have gone through the kernel-vs-oracle parity assertion at least once.
-    if len(_CI_DONE) == len(_CI_SEEDS):
-        missing = set(range(1, N_INSCOPE + 1)) - _FIRED
-        assert not missing, missing
+    assert set(INSCOPE_IDS) <= seen_ids, set(INSCOPE_IDS) - seen_ids
+    missing = set(range(1, N_INSCOPE + 1)) - fired_dense
+    assert not missing, missing
 
 
 def test_golden_values_oracle_free():

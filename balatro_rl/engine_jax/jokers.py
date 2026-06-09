@@ -174,6 +174,11 @@ _set(RETRIG_BRANCHES, 36, _retrig_rank_in([2, 3, 4, 5]))                     # H
 _set(RETRIG_BRANCHES, 109, lambda r, s, f: jnp.where(f, jnp.int32(1), I0))  # Sock & Buskin
 
 # --- on_held branches (Task 2.5) ---------------------------------------------------
+# Baron applies x1.5 per held King. Known float32 edge: the kernel's float32 `mult`
+# diverges from the Python float64 oracle by +/-1 in `score` only under >=~16
+# consecutive x1.5 multiplications (e.g. a pathological 5-Baron loadout x 4 held
+# Kings = 20 x1.5 factors) — unreachable by the random corpus and Gate B's curated
+# single-Baron loadouts.
 _set(ON_HELD_BRANCHES, 72, lambda r, s, f: (I0, F0, jnp.where(r == 13, jnp.float32(1.5), F1)))  # Baron x1.5 per held King
 
 
@@ -242,7 +247,12 @@ def _contains_predicates(p_rank, p_suit, p_mask):
 
 def score_with_jokers(p_rank, p_suit, p_mask, h_rank, h_suit, h_mask, levels, jokers,
                       *, money, discards_left, deck_count, hand_plays_run, hand_plays_round):
-    """Ordered fold matching score_play (plain cards). Returns (hand_type, chips, mult, score)."""
+    """Ordered fold matching score_play (plain cards). Returns (hand_type, chips, mult, score).
+
+    `mult` is accumulated in float32 — exact for the dyadic/integer factors in scope EXCEPT
+    >=~16 stacked x1.5 (see Baron note above); mirrors the oracle's own float64 limit note
+    at engine/scoring.py:295.
+    """
     p_rank = jnp.asarray(p_rank, jnp.int32); p_suit = jnp.asarray(p_suit, jnp.int32)
     p_mask = jnp.asarray(p_mask, jnp.bool_)
     h_rank = jnp.asarray(h_rank, jnp.int32); h_suit = jnp.asarray(h_suit, jnp.int32)
