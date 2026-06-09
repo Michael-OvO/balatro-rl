@@ -1,8 +1,12 @@
 """Gate A: component parity of score_with_jokers vs engine.scoring.score_play."""
+import os
+
 import jax
 import jax.numpy as jnp
 import numpy as np
 import pytest
+
+BALATRO_RUN_SLOW = os.environ.get("BALATRO_RUN_SLOW") == "1"
 
 from balatro_rl.engine.cards import Card
 from balatro_rl.engine.jokers.base import JokerState
@@ -75,13 +79,17 @@ def test_independent_batch1():
     _assert_match([(9,0),(9,1)], [131]); _assert_match([(9,0),(9,1),(9,2)], [132])
     # Abstract +3 per joker (here 2 jokers -> +6) ; Banner +30 per discard
     _assert_match([(2,0)], [34, 1]); _assert_match([(2,0)], [22], discards_left=3)
-    # Bull +2 per $ ; Blue +2 per deck card ; Half +20 if <=3 cards
+    # Bull +2 per $ ; Blue +2 per deck card ; Half +20 if <=3 cards (and no-fire on 4 cards)
     _assert_match([(2,0)], [93], money=7); _assert_match([(2,0)], [53], deck_count=44)
     _assert_match([(2,0),(3,0),(4,0)], [16])
-    # Mystic +15 if 0 discards ; Supernova +(plays_run+1) ; Card Sharp x3 if played this round
+    _assert_match([(2,0),(3,0),(4,0),(5,1)], [16])              # 4 played -> Half no-fire
+    # Mystic +15 if 0 discards (and no-fire with discards left)
     _assert_match([(2,0)], [23], discards_left=0)
+    _assert_match([(2,0)], [23], discards_left=2)               # Mystic no-fire
+    # Supernova +(plays_run+1) ; Card Sharp x3 if played this round (and no-fire at 0)
     _assert_match([(2,0),(2,1)], [43], hand_plays_run=[0,2,0,0,0,0,0,0,0,0,0,0])
     _assert_match([(2,0),(2,1)], [62], hand_plays_round=[0,1,0,0,0,0,0,0,0,0,0,0])
+    _assert_match([(2,0),(2,1)], [62])                          # plays_round=0 -> Card Sharp no-fire
     # Joker Stencil x(empty_slots+1): 1 joker, 4 empty -> x5
     _assert_match([(2,0)], [17])
     # Flush jokers: Droll +10, The Tribe x2, Crafty +80
@@ -94,8 +102,11 @@ def test_independent_batch1():
     _assert_match([(2,0),(2,1),(3,2),(3,3)], [8]); _assert_match([(2,0),(2,1),(3,2),(3,3)], [13])
     _assert_match([(4,0),(4,1),(4,2)], [7]); _assert_match([(4,0),(4,1),(4,2)], [12])
     _assert_match([(4,0),(4,1),(4,2),(4,3)], [133])
-    # Seeing Double x2 (club + other) ; Flower Pot x3 (all four suits)
-    _assert_match([(2,2),(3,1)], [128]); _assert_match([(2,0),(3,1),(4,2),(5,3),(6,0)], [122])
+    # Seeing Double x2: pair 3♣3♥ -> both score -> Club+other -> FIRES;
+    # High Card 2♣3♥ -> only the 3♥ scores (no scoring Club) -> no-fire.
+    _assert_match([(3,2),(3,1)], [128]); _assert_match([(2,2),(3,1)], [128])
+    # Flower Pot x3 (all four suits)
+    _assert_match([(2,0),(3,1),(4,2),(5,3),(6,0)], [122])
     # Blackboard x3 (all held spade/club) ; vacuous when none held
     _assert_match([(2,0)], [48]); _assert_match([(2,0)], [48], held=[(9,0),(9,2)])
 
@@ -158,3 +169,116 @@ def test_score_with_jokers_jit_vmap_batches():
         hand_plays_run=a[11],hand_plays_round=a[12]))(
         pr,ps,pm,hr,hs,hm,lv,jk,z,z,z,z12,z12)
     assert out[3].shape == (3,)  # score per env
+
+
+def test_baron_held():
+    # Baron x1.5 per held King; play a pair, hold two Kings -> x1.5*1.5
+    _assert_match([(9,0),(9,1)], [72], held=[(13,0),(13,2)])
+    _assert_match([(9,0),(9,1)], [72], held=[(13,0),(9,2)])   # one King
+
+
+# --- full randomized parity over the whole in-scope set ---
+from balatro_rl.engine_jax.jokers import INSCOPE_IDS, N_INSCOPE
+
+_FIRED = set()    # dense ids observed firing across the CI corpus (coverage)
+_CI_DONE = set()  # CI seeds completed (guards the _FIRED assertion below)
+_CI_SEEDS = range(200)
+
+
+def _random_case(rng):
+    n = int(rng.integers(1, 6))
+    deck = rng.permutation([(r, s) for r in range(2, 15) for s in range(4)])
+    played = [tuple(int(x) for x in deck[i]) for i in range(n)]
+    nheld = int(rng.integers(0, 6))
+    held = [tuple(int(x) for x in deck[n + i]) for i in range(nheld)]
+    k = int(rng.integers(0, 6))
+    jokers = [int(rng.choice(INSCOPE_IDS)) for _ in range(k)]
+    levels = [int(rng.integers(1, 4)) for _ in range(12)]
+    money = int(rng.integers(0, 30)); discards = int(rng.integers(0, 4)); deck_count = int(rng.integers(0, 45))
+    hpr = [int(rng.integers(0, 4)) for _ in range(12)]; hpo = [int(rng.integers(0, 3)) for _ in range(12)]
+    return dict(played=played, jokers=jokers, held=held, levels=levels, money=money,
+                discards_left=discards, deck_count=deck_count, hand_plays_run=hpr, hand_plays_round=hpo)
+
+
+@pytest.mark.parametrize("seed", _CI_SEEDS)
+def test_random_parity_ci(seed):
+    rng = np.random.default_rng(seed)
+    case = _random_case(rng)
+    _assert_match(**case)
+    from balatro_rl.engine_jax.jokers import _dense_np
+    for j in case["jokers"]:
+        _FIRED.add(int(_dense_np[j]))
+    _CI_DONE.add(seed)
+
+
+def test_coverage_every_inscope_joker_appears():
+    # Drive enough cases to hit all ids; assert all in-scope ids appear in loadouts.
+    rng = np.random.default_rng(12345)
+    seen = set()
+    for _ in range(4000):
+        case = _random_case(rng)
+        for j in case["jokers"]:
+            seen.add(j)
+        if len(seen) == N_INSCOPE:
+            break
+    assert set(INSCOPE_IDS) <= seen, set(INSCOPE_IDS) - seen
+    # And when the full CI sweep ran first (normal file-order run), every dense id
+    # must have gone through the kernel-vs-oracle parity assertion at least once.
+    if len(_CI_DONE) == len(_CI_SEEDS):
+        missing = set(range(1, N_INSCOPE + 1)) - _FIRED
+        assert not missing, missing
+
+
+def test_golden_values_oracle_free():
+    # Hand-computed: pair of Aces (PAIR base 10c/2m), Aces score 11+11=22 -> 32c.
+    # Joker +4 mult -> mult 6 ; The Duo x2 (pair) -> applied in slot order.
+    # Slot order [Joker(+4), Duo(x2)]: (2+4)*2 = 12 mult -> 32*12 = 384.
+    o = _kernel([(14,0),(14,1)], [1, 131]); assert int(o[3]) == 384
+    # Slot order [Duo(x2), Joker(+4)]: (2*2)+4 = 8 mult -> 32*8 = 256.
+    o = _kernel([(14,0),(14,1)], [131, 1]); assert int(o[3]) == 256
+
+
+@pytest.mark.parametrize("order", [(1,131,6), (6,1,131), (131,6,1)])
+def test_fold_order_matches_oracle(order):
+    _assert_match([(14,0),(14,1)], list(order))
+
+
+def test_negative_control_gate_has_teeth():
+    # Order sensitivity: [Joker(+4), Duo(x2)] != [Duo(x2), Joker(+4)] (384 vs 256). If the
+    # kernel were order-insensitive (a "sum-then-multiply" bug) these would be equal and the
+    # episode/golden gates would silently pass a wrong kernel. They must differ.
+    a = int(_kernel([(14,0),(14,1)], [1, 131])[3])
+    b = int(_kernel([(14,0),(14,1)], [131, 1])[3])
+    assert a != b and (a, b) == (384, 256)
+
+
+def test_out_of_scope_id_is_noop():
+    # A deferred joker id (e.g. RIDE_THE_BUS=44) must behave as an empty slot.
+    base = _kernel([(14,0),(14,1)], [])
+    with_oos = _kernel([(14,0),(14,1)], [44])
+    assert int(base[3]) == int(with_oos[3])
+
+
+def test_max_retrigger_path_parity():
+    # Exercises the static unroll bound (1 + MAX_JOKERS passes) and verifies via parity:
+    # 5 Hacks all retrigger a played 3 -> 5 retriggers -> 6 passes.
+    _assert_match([(3,0),(3,1)], [36, 36, 36, 36, 36])
+    # Pareidolia makes a low card count as a face, so Hack AND Sock & Buskin both fire on a 3
+    # -> +2 retriggers on that card; parity must still hold.
+    _assert_match([(3,0),(3,1)], [36, 109, 37])
+
+
+def test_planet_levels_parity():
+    # Spec §8.C: a leveled loadout (Planet upgrades) + jokers scores at parity. Level the
+    # PAIR hand type (index 1) to 3 and add Joker; the kernel must honor levels[ht] exactly.
+    lv = [1, 3, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1]
+    _assert_match([(14,0),(14,1)], [1], levels=lv)
+    _assert_match([(9,0),(9,1),(9,2)], [132], levels=[1,1,1,4,1,1,1,1,1,1,1,1])  # trips lvl 4 + The Trio
+
+
+@pytest.mark.slow
+@pytest.mark.skipif(not BALATRO_RUN_SLOW, reason="set BALATRO_RUN_SLOW=1")
+def test_random_parity_1000():
+    rng = np.random.default_rng(2024)
+    for _ in range(1000):
+        _assert_match(**_random_case(rng))

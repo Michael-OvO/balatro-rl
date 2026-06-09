@@ -81,13 +81,13 @@ class IndepCtx(NamedTuple):
     played_count: jnp.ndarray
 
 
-# --- branch tables (populated in Tasks 2.3-2.5; all no-op for now) -------------
+# --- branch tables (populated below: independent 2.3, on_score/retrigger 2.4, on_held 2.5) ---
 def _noop_score(r, s, f, ff):   return (I0, F0, F1)
 def _noop_held(r, s, f):        return (I0, F0, F1)
 def _noop_indep(c):             return (I0, F0, F1)
 def _noop_retrig(r, s, f):      return I0
 
-# Each table has N_INSCOPE + 1 entries (index 0 = no-op). Tasks 2.3-2.5 replace
+# Each table has N_INSCOPE + 1 entries (index 0 = no-op). The sections below replace
 # the no-ops at the dense indices they implement.
 ON_SCORE_BRANCHES = [_noop_score] * (N_INSCOPE + 1)
 ON_HELD_BRANCHES  = [_noop_held]  * (N_INSCOPE + 1)
@@ -141,6 +141,15 @@ def _score_rank_in(ranks, dchips=0, dmult=0.0):
     return fn
 
 
+# --- retrigger branch factories ----------------------------------------------------
+def _retrig_rank_in(ranks):
+    """+1 retrigger when the played card's rank is in the set."""
+    rset = jnp.asarray(ranks, jnp.int32)
+    def fn(r, s, f):
+        return jnp.where(jnp.any(r == rset), jnp.int32(1), I0)
+    return fn
+
+
 # --- on_score branches (Task 2.4) ------------------------------------------------
 # suit
 _set(ON_SCORE_BRANCHES, 2, _score_suit(3, dmult=3))      # Greedy ♦
@@ -161,8 +170,11 @@ _set(ON_SCORE_BRANCHES, 41, _score_rank_in([14], dchips=20, dmult=4))      # Sch
 _set(ON_SCORE_BRANCHES, 101, _score_rank_in([10, 4], dchips=10, dmult=4))  # Walkie Talkie
 
 # --- retrigger branches (Task 2.4) -----------------------------------------------
-_set(RETRIG_BRANCHES, 36, lambda r, s, f: jnp.where(jnp.any(r == jnp.array([2, 3, 4, 5], jnp.int32)), jnp.int32(1), I0))  # Hack
+_set(RETRIG_BRANCHES, 36, _retrig_rank_in([2, 3, 4, 5]))                     # Hack
 _set(RETRIG_BRANCHES, 109, lambda r, s, f: jnp.where(f, jnp.int32(1), I0))  # Sock & Buskin
+
+# --- on_held branches (Task 2.5) ---------------------------------------------------
+_set(ON_HELD_BRANCHES, 72, lambda r, s, f: (I0, F0, jnp.where(r == 13, jnp.float32(1.5), F1)))  # Baron x1.5 per held King
 
 
 # --- independent branches (Task 2.3) -------------------------------------------
