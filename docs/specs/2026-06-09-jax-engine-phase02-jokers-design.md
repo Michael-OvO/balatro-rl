@@ -157,7 +157,14 @@ the regime where float32 represents these values *exactly*, so float32 and float
 `int(chips*mult)` floors identically. The component gate (§8.A) asserts exact equality over
 randomized loadouts/hands and would catch any boundary violation. **No non-dyadic xmult is in
 scope** (Ramen's ×0.01, Misprint, etc. are all excluded), so the property holds by construction.
-If Phase 3 introduces a non-dyadic factor, revisit with `jax_enable_x64` for the scoring kernel.
+
+**One known edge (found in Task 2.5):** *stacked* `×1.5` factors (Baron — ×1.5 per held King)
+accumulate as `3^k/2^k`, whose numerator passes 2²⁴ at `k≥16`. A pathological loadout of 5 Barons ×
+4 held Kings applies 20 such factors and can make the float32 `floor(chips*mult)` differ from the
+float64 oracle by ±1. The random corpus (p≈4e-9) and Gate B's curated single-Baron loadouts never
+reach it; it is documented in `jokers.py` near Baron, mirroring the oracle's own float64 limit note
+(`engine/scoring.py:295`). If Phase 3 introduces a non-dyadic factor or multi-Baron loadouts matter,
+revisit with `jax_enable_x64` for the scoring kernel.
 
 ### 4.4 Step integration (`engine_jax/step.py`)
 
