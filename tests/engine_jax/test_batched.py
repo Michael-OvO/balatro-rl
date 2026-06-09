@@ -23,6 +23,11 @@ from balatro_rl.engine_jax.config import Phase, Verb, HANDS_PER_BLIND, DISCARDS_
 from balatro_rl.engine_jax.rewards import shaped_core
 from tests.engine_jax.parity_util import build_required_table
 
+# step now folds the full joker pipeline (Task 2.6), so an UNCOMPILED trace costs
+# ~0.5s — jit once at module level so the single-env loops below run in ~ms per step.
+_JIT_STEP = jax.jit(J.step)
+_JIT_STEP_ACTION = jax.jit(J.step_with_action)
+
 
 def _zero_jokers(n: int) -> jnp.ndarray:
     """Return a zeros int32[n, MAX_JOKERS] joker loadout (empty, Phase-1 compatible)."""
@@ -323,7 +328,7 @@ def test_batched_step_vmap_consistency():
 
     for i in range(N_CHECK):
         lane_state = jax.tree_util.tree_map(lambda x: x[i], states)
-        single_next, single_reward, single_done, single_sigs = J.step_with_action(
+        single_next, single_reward, single_done, single_sigs = _JIT_STEP_ACTION(
             lane_state, action_ids[i])
 
         # Compare state scalars
@@ -386,7 +391,7 @@ def _force_to_done(state, req_table):
             break
         aid = int(play_ids[0])
         verb, sel = J.decode_action(jnp.int32(aid))
-        cur, last_sigs = J.step(cur, verb, sel)
+        cur, last_sigs = _JIT_STEP(cur, verb, sel)
     return cur, last_sigs
 
 
@@ -401,7 +406,7 @@ def test_auto_reset_returns_fresh_state():
 
     # Now call step_with_action on done_state with any action:
     # the auto-reset should give us a fresh state despite done=True input.
-    final_state, reward, done_flag, signals = J.step_with_action(done_state, jnp.int32(0))
+    final_state, reward, done_flag, signals = _JIT_STEP_ACTION(done_state, jnp.int32(0))
 
     # The returned STATE should be a fresh episode
     assert int(final_state.ante) == 1, f"Expected ante=1 after auto-reset, got {int(final_state.ante)}"
@@ -439,7 +444,7 @@ def test_auto_reset_signals_reflect_terminal():
             break
         aid = int(play_ids[0])
         verb, sel = J.decode_action(jnp.int32(aid))
-        next_s, sigs = J.step(cur, verb, sel)
+        next_s, sigs = _JIT_STEP(cur, verb, sel)
         if bool(next_s.done):
             # Already went done before hands_left==1; that's fine — pick this terminal
             cur = next_s
@@ -459,10 +464,10 @@ def test_auto_reset_signals_reflect_terminal():
         mask = np.asarray(legal_mask_core(cur), dtype=bool)
         play_ids = np.nonzero(mask[:PLAY_N])[0]
         aid = int(play_ids[0]) if len(play_ids) > 0 else 0
-        term_state, term_sigs = J.step(cur, *J.decode_action(jnp.int32(aid)))
+        term_state, term_sigs = _JIT_STEP(cur, *J.decode_action(jnp.int32(aid)))
         # term_state.done must be True (either LOST or cleared/advanced)
         # Now call step_with_action on cur (the pre-terminal state)
-        final_state, reward, done_flag, signals = J.step_with_action(cur, jnp.int32(aid))
+        final_state, reward, done_flag, signals = _JIT_STEP_ACTION(cur, jnp.int32(aid))
 
         # done_flag must be True (the transition produced a terminal)
         assert bool(done_flag), (
@@ -499,7 +504,7 @@ def test_auto_reset_signals_reflect_terminal():
             )
     else:
         # cur is already done from the driving loop — still test step_with_action
-        final_state, reward, done_flag, signals = J.step_with_action(cur, jnp.int32(0))
+        final_state, reward, done_flag, signals = _JIT_STEP_ACTION(cur, jnp.int32(0))
         assert int(final_state.ante) == 1
         assert not bool(final_state.done)
 

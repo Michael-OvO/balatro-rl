@@ -37,8 +37,8 @@ from balatro_rl.engine_jax.config import (
     STARTING_MONEY,
     Verb,
 )
+from balatro_rl.engine_jax.jokers import score_with_jokers
 from balatro_rl.engine_jax.rewards import shaped_core
-from balatro_rl.engine_jax.scoring import score_core
 from balatro_rl.engine_jax.state import DECK_SIZE, CoreState
 
 # Re-export for tests that import from this module.
@@ -297,7 +297,7 @@ def _compact_and_refill(state: CoreState, sel_mask, target):
 
 
 def _gather_selected(state: CoreState, sel_mask):
-    """Pack the selected (present) cards into 5-slot ranks/suits/mask for ``score_core``.
+    """Pack the selected (present) cards into 5-slot ranks/suits/mask for scoring.
 
     The oracle scores ``selected = [hand[i] for i in idx]`` — the chosen cards in
     ASCENDING slot order. We replicate that: a stable left-pack of the slots where
@@ -356,11 +356,21 @@ def step(state: CoreState, verb, sel_mask):
     is_play = verb == Verb.PLAY
 
     # ----------------------------------------------------------------- scoring
-    # Score the selected cards (used only on the PLAY branch; cheap to compute
-    # unconditionally for branchlessness).
+    # Score the selected cards through the joker fold (used only on the PLAY
+    # branch; computed unconditionally for branchlessness). With an empty
+    # loadout this reduces exactly to score_core (Phase-1 behaviour).
     sel_rank, sel_suit, sel_present = _gather_selected(state, sel_mask)
-    hand_type, _chips, _mult, score = score_core(
-        sel_rank, sel_suit, sel_present, state.levels)
+    held_mask = state.hand_mask & ~sel_mask                       # cards kept in hand
+    deck_count = DECK_SIZE - state.deck_ptr
+    # NOTE: hand_plays_run/round are read PRE-increment (the bump to
+    # play_plays_run/round happens below), matching score_play's pre-increment
+    # contract for Supernova / Card Sharp.
+    hand_type, _chips, _mult, score = score_with_jokers(
+        sel_rank, sel_suit, sel_present,
+        state.hand_rank.astype(jnp.int32), state.hand_suit.astype(jnp.int32), held_mask,
+        state.levels, state.jokers,
+        money=state.money, discards_left=state.discards_left, deck_count=deck_count,
+        hand_plays_run=state.hand_plays_run, hand_plays_round=state.hand_plays_round)
 
     round_score_after = state.round_score + score
     cleared = is_play & (round_score_after >= state.required)

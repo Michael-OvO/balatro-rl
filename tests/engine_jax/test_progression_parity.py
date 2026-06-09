@@ -25,6 +25,7 @@ the boundary handling.
 PART C (win path) runs the same driver at a tiny scale where every required floors
 to 1, so every play clears and both engines race to the ante-8 boss WIN.
 """
+import jax
 import numpy as np
 
 from balatro_rl.engine import engine
@@ -42,6 +43,10 @@ from tests.engine_jax.parity_util import (
     jax_core_fields,
     python_core_fields,
 )
+
+# step now folds the full joker pipeline (Task 2.6), so an UNCOMPILED trace costs
+# ~0.5s — jit once at module level so the per-step loop below runs in ~ms.
+_JIT_STEP = jax.jit(J.step)
 
 # Scales:
 #   0.2  -> crosses some boundaries, mostly ends in LOSS (boundary handling exercise).
@@ -166,7 +171,7 @@ def _run_episode(seed, scale, step_cap):
         sel = _sel_mask(idxs)
 
         gs2, _info = engine.step(gs, (verb, tuple(idxs)))
-        cs2, sig = J.step(cs, int(verb), sel)
+        cs2, sig = _JIT_STEP(cs, int(verb), sel)
 
         if gs2.won or gs2.phase == Phase.WON:
             # WIN: cleared the ante-8 boss. JAX must flag won + reach the WON terminal.

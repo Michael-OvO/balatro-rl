@@ -24,6 +24,7 @@ Keys that are always zero in Python (during a core play-only run, no shop):
 """
 from __future__ import annotations
 
+import jax
 import numpy as np
 import pytest
 
@@ -35,6 +36,10 @@ from balatro_rl.engine_jax import step as J
 from balatro_rl.engine_jax.config import MAX_HAND
 from balatro_rl.engine_jax.obs import encode_core, legal_mask_core
 from tests.engine_jax.parity_util import deck_from_python
+
+# step now folds the full joker pipeline (Task 2.6), so an UNCOMPILED trace costs
+# ~0.5s — jit once at module level so the per-step loop below runs in ~ms.
+_JIT_STEP = jax.jit(J.step)
 
 N_SEEDS = 40
 MAX_STEPS = 30
@@ -168,7 +173,7 @@ def _run_policy(pick_action_id, label: str) -> int:
             sel = _sel_mask(idxs)
 
             gs2, _info = engine.step(gs, (verb, tuple(idxs)))
-            cs2, sig = J.step(cs, int(verb), sel)
+            cs2, sig = _JIT_STEP(cs, int(verb), sel)
 
             info = f"{label} seed={seed} step={step_i}"
 

@@ -27,6 +27,7 @@ from __future__ import annotations
 import os
 import random
 
+import jax
 import numpy as np
 import pytest
 
@@ -63,6 +64,10 @@ OBS_ATOL = 1e-5
 REWARD_ATOL = 1e-5
 
 _oracle_reward = Shaped(gamma=0.999)
+
+# step now folds the full joker pipeline (Task 2.6), so an UNCOMPILED trace costs
+# ~0.5s — jit once at module level so the rollout loops below run in ~ms per step.
+_JIT_STEP = jax.jit(J.step)
 
 # The gate compares only the CORE observation keys. The remaining OBS keys
 # (joker_*, shop_*, boss_onehot, consum_*, pack_*, voucher_*, pending_consum) are
@@ -120,7 +125,7 @@ def _run_rollout(seed: int, scale: float) -> dict:
 
         prev_gs, prev_cs = gs, cs
         gs2, info = engine.step(gs, (verb, tuple(idxs)))
-        cs2, sig = J.step(cs, int(verb), sel)
+        cs2, sig = _JIT_STEP(cs, int(verb), sel)
         where = f"seed={seed} scale={scale} verb={int(verb)}"
 
         if gs2.won or gs2.phase == Phase.WON:
