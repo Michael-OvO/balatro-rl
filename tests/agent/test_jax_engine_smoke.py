@@ -117,3 +117,13 @@ def test_jax_vec_env_joker_loadout_in_obs():
     assert np.all(jt[:, 0] == 1),   "slot 0 must hold Joker (id 1) in every env"
     assert np.all(jt[:, 1] == 131), "slot 1 must hold The Duo (id 131) in every env"
     assert np.all(jt[:, 2:] == 0),  "remaining slots must be 0-padded"
+
+
+def test_jax_vec_env_loadout_too_long_raises():
+    """A loadout longer than MAX_JOKERS slots is rejected at construction."""
+    from balatro_rl.envs.jax_vec_env import JaxVectorEnv
+    from balatro_rl.envs.actions import MAX_JOKERS
+
+    with pytest.raises(ValueError, match="slots"):
+        JaxVectorEnv(4, reward_name="shaped", base_seed=0,
+                     joker_loadout=list(range(1, MAX_JOKERS + 2)))

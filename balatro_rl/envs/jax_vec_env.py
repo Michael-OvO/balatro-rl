@@ -85,7 +85,7 @@ class JaxVectorEnv:
         self._base_seed = base_seed
         self._req_scale = req_scale
         self._boss_rate_warned = False
-        self.joker_loadout = list(joker_loadout) if joker_loadout else []
+        self.joker_loadout = list(joker_loadout) if joker_loadout is not None else []
         if len(self.joker_loadout) > MAX_JOKERS:
             raise ValueError(
                 f"JaxVectorEnv: joker_loadout has {len(self.joker_loadout)} ids "

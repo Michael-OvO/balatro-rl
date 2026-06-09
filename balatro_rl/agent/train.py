@@ -70,7 +70,7 @@ class TrainConfig:
     engine: str = "python"
     # Fixed joker loadout (engine="jax" only): list of joker ids every env holds for
     # the whole run (constant — acquisition is Phase 3). None = no jokers (Phase 1).
-    joker_loadout: typing.Optional[list] = None
+    joker_loadout: typing.Optional[list[int]] = None
 
 
 @dataclasses.dataclass
