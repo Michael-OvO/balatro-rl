@@ -12,6 +12,7 @@ Usage
     python scripts/bench_jax_engine.py                 # default sizes (CPU-safe)
     BENCH_SIZES=1000,10000,50000 python scripts/bench_jax_engine.py
     BENCH_STEPS=200 python scripts/bench_jax_engine.py
+    BENCH_JOKERS=1,131,3,109,52 python scripts/bench_jax_engine.py  # Phase-2 joker loadout
 
 Defaults are CPU-memory-safe (1k, 10k). 50k is heavy on CPU; pass it explicitly via
 BENCH_SIZES (it is the intended GPU batch size). On a GPU box, run with
@@ -45,6 +46,15 @@ def _sizes() -> list[int]:
 
 def _num_steps() -> int:
     return int(os.environ.get("BENCH_STEPS", "200"))
+
+
+def _joker_loadout() -> list[int]:
+    """Optional joker loadout (BENCH_JOKERS=comma-separated ids; default empty)."""
+    raw = os.environ.get("BENCH_JOKERS", "")
+    ids = [int(x) for x in raw.split(",") if x.strip()]
+    if len(ids) > MAX_JOKERS:
+        raise SystemExit(f"BENCH_JOKERS: at most {MAX_JOKERS} ids, got {len(ids)}")
+    return ids
 
 
 def _first_legal_action(state) -> jnp.ndarray:
@@ -113,19 +123,23 @@ class _GpuSampler(threading.Thread):
 def main() -> None:
     sizes = _sizes()
     num_steps = _num_steps()
+    loadout = _joker_loadout()
+    jk_row = jnp.zeros((MAX_JOKERS,), dtype=jnp.int32).at[: len(loadout)].set(
+        jnp.asarray(loadout, dtype=jnp.int32))  # 0-padded loadout, shared by every env
     req_table = build_required_table(0.5)  # mid curriculum; scale doesn't affect throughput
 
     cuda = _has_cuda()
     print(f"JAX devices: {jax.devices()}")
-    print(f"steps/rollout = {num_steps}; batch sizes = {sizes}\n")
+    print(f"steps/rollout = {num_steps}; batch sizes = {sizes}")
+    print(f"joker loadout = {loadout if loadout else 'empty (no jokers)'}\n")
     gpu_hdr = f" {'gpu%peak':>9} {'gpu%mean':>9}" if cuda else ""
     print(f"{'num_envs':>10} {'wall_s':>9} {'env-steps/s':>16}{gpu_hdr}")
     print("-" * (40 + (20 if cuda else 0)))
 
     for n in sizes:
         keys = jax.random.split(jax.random.PRNGKey(0), n)
-        zero_jk = jnp.zeros((n, MAX_JOKERS), dtype=jnp.int32)  # Phase-2 empty loadout
-        state = batched_reset(keys, req_table, zero_jk)
+        jk = jnp.broadcast_to(jk_row, (n, MAX_JOKERS))  # same loadout in every env
+        state = batched_reset(keys, req_table, jk)
         jax.block_until_ready(state)
         rollout = _make_rollout(num_steps)
 
