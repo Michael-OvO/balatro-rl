@@ -57,6 +57,11 @@ class TrainConfig:
     # fade in as the score target ramps (the plateau came from full-strength bosses under a still-
     # low target). No-op unless enable_bosses; eval always uses the full deploy target (boss_rate=1).
     boss_curriculum: bool = True
+    # Boss fade-in steepness: per-episode boss_rate = cur_scale ** boss_curriculum_power (when
+    # boss_curriculum is on). power=1.0 (default) tracks the score ramp 1:1; power>1 makes bosses
+    # LAG the score ramp (e.g. power=2 -> scale 0.8 gives boss_rate 0.64), decoupling the two
+    # difficulty axes so they don't stack into a wall. Default 1.0 keeps prior behavior unchanged.
+    boss_curriculum_power: float = 1.0
     # Early stopping: stop once the eval metric stops improving — catches the plateau/overfit where
     # more updates no longer help (and may regress). Counts CONSECUTIVE evals without a > min_delta
     # improvement over the best-so-far; stops at `patience`. 0 = off (train the full num_updates).
@@ -172,7 +177,7 @@ def train(cfg: TrainConfig, logger=None, init_params=None, on_update=None) -> Tr
     cur_scale = float(cfg.req_scale_schedule(0)) if _open_loop else float(cfg.curr_floor)
     # Boss probability tracks the score curriculum (E5); 1.0 when the boss curriculum is off.
     def _boss_rate_for(scale: float) -> float:
-        return float(scale) if cfg.boss_curriculum else 1.0
+        return float(scale ** cfg.boss_curriculum_power) if cfg.boss_curriculum else 1.0
     if cfg.engine == "jax":
         venv = JaxVectorEnv(cfg.num_envs, reward_name=cfg.reward_name,
                             base_seed=cfg.seed + 1000, req_scale=cur_scale,
