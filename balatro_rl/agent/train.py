@@ -68,6 +68,9 @@ class TrainConfig:
     # (GPU-native, no boss support).  JaxVectorEnv requires enable_bosses=False and
     # reward_name="shaped".
     engine: str = "python"
+    # Fixed joker loadout (engine="jax" only): list of joker ids every env holds for
+    # the whole run (constant — acquisition is Phase 3). None = no jokers (Phase 1).
+    joker_loadout: typing.Optional[list[int]] = None
 
 
 @dataclasses.dataclass
@@ -176,7 +179,8 @@ def train(cfg: TrainConfig, logger=None, init_params=None, on_update=None) -> Tr
     if cfg.engine == "jax":
         venv = JaxVectorEnv(cfg.num_envs, reward_name=cfg.reward_name,
                             base_seed=cfg.seed + 1000, req_scale=cur_scale,
-                            enable_bosses=cfg.enable_bosses)
+                            enable_bosses=cfg.enable_bosses,
+                            joker_loadout=cfg.joker_loadout)
     else:
         venv = SyncVectorEnv(cfg.num_envs, cfg.reward_name, base_seed=cfg.seed + 1000,
                              req_scale=cur_scale, enable_bosses=cfg.enable_bosses,

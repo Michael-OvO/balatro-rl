@@ -17,11 +17,13 @@ Blind boundaries are out of scope here (Task 1.4): when the Python step CLEARS t
 blind (lands in SHOP / WON) we break WITHOUT asserting (the JAX clear half-state is
 intentionally uncompared). The LOSS terminal IS compared (refilled hand + LOST).
 """
+import jax
+import jax.numpy as jnp
 import numpy as np
 
 from balatro_rl.engine import engine
 from balatro_rl.engine.state import Phase
-from balatro_rl.envs.actions import decode, legal_mask, PLAY_N
+from balatro_rl.envs.actions import decode, legal_mask, MAX_JOKERS, PLAY_N, _SUBSETS
 from balatro_rl.engine_jax import step as J
 from balatro_rl.engine_jax.config import MAX_HAND
 from tests.engine_jax.parity_util import (
@@ -31,6 +33,10 @@ from tests.engine_jax.parity_util import (
     jax_core_fields,
     python_core_fields,
 )
+
+# step now folds the full joker pipeline (Task 2.6), so an UNCOMPILED trace costs
+# ~0.5s — jit once at module level so the per-step loop below runs in ~ms.
+_JIT_STEP = jax.jit(J.step)
 
 N_SEEDS = 50
 MAX_STEPS = 30
@@ -76,7 +82,7 @@ def _run_policy(pick_action_id):
             sel = _sel_mask(idxs)
 
             gs2, _info = engine.step(gs, (verb, tuple(idxs)))
-            cs2, sig = J.step(cs, int(verb), sel)
+            cs2, sig = _JIT_STEP(cs, int(verb), sel)
 
             if gs2.phase in (Phase.SHOP, Phase.WON) or gs2.won:
                 # Blind cleared: JAX clear half-state is intentionally uncompared
@@ -121,3 +127,17 @@ def test_discard_policy_parity():
 
     compared = _run_policy(pick)
     assert compared > 0, "no within-blind transitions were compared"
+
+
+def test_step_uses_jokers_loadout():
+    # Deterministic deck: first 8 cards are the opening hand. Make slots 0,1 a pair of Aces.
+    ranks = [14, 14] + [r for r in range(2, 15) for _ in range(4)][:50]
+    suits = [0, 1] + [s for _ in range(2, 15) for s in range(4)][:50]
+    jk = np.zeros(MAX_JOKERS, np.int32); jk[0] = 1  # JOKER +4 mult
+    st = J.reset(ranks, suits, required=10**9, jokers=jk)  # huge required -> never clears
+    # PLAY the pair of Aces: subset {0,1}.
+    aid = _SUBSETS.index((0, 1))
+    verb, sel = J.decode_action(jnp.int32(aid))
+    ns, sig = _JIT_STEP(st, verb, sel)
+    # PAIR base 10c/2m; aces 11+11 -> 32c; Joker +4 -> mult 6 -> 192.
+    assert int(sig.score) == 192

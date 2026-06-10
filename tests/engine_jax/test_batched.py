@@ -16,12 +16,22 @@ import numpy as np
 import jax
 import jax.numpy as jnp
 
-from balatro_rl.envs.actions import _SUBSETS, decode as py_decode, PLAY_N
+from balatro_rl.envs.actions import _SUBSETS, decode as py_decode, PLAY_N, MAX_JOKERS
 from balatro_rl.engine_jax import step as J
 from balatro_rl.engine_jax.obs import encode_core, legal_mask_core
 from balatro_rl.engine_jax.config import Phase, Verb, HANDS_PER_BLIND, DISCARDS_PER_BLIND, MAX_HAND
 from balatro_rl.engine_jax.rewards import shaped_core
 from tests.engine_jax.parity_util import build_required_table
+
+# step now folds the full joker pipeline (Task 2.6), so an UNCOMPILED trace costs
+# ~0.5s — jit once at module level so the single-env loops below run in ~ms per step.
+_JIT_STEP = jax.jit(J.step)
+_JIT_STEP_ACTION = jax.jit(J.step_with_action)
+
+
+def _zero_jokers(n: int) -> jnp.ndarray:
+    """Return a zeros int32[n, MAX_JOKERS] joker loadout (empty, Phase-1 compatible)."""
+    return jnp.zeros((n, MAX_JOKERS), dtype=jnp.int32)
 
 
 # ---------------------------------------------------------------------------
@@ -176,7 +186,7 @@ def test_batched_reset_shape():
     """batched_reset over N=1024 keys -> CoreState with leading dim 1024."""
     keys = _make_keys(N)
     req_table = _default_required_table()
-    states = J.batched_reset(keys, req_table)
+    states = J.batched_reset(keys, req_table, _zero_jokers(N))
 
     assert states.deck_rank.shape == (N, 52)
     assert states.hand_rank.shape == (N, MAX_HAND)
@@ -191,15 +201,39 @@ def test_batched_reset_jit():
     keys = _make_keys(N)
     req_table = _default_required_table()
     jit_reset = jax.jit(J.batched_reset)
-    states = jit_reset(keys, req_table)
+    states = jit_reset(keys, req_table, _zero_jokers(N))
     assert states.ante.shape == (N,)
+
+
+def test_reset_jax_nonzero_loadout_stored_verbatim():
+    """reset_jax stores a non-zero joker loadout verbatim; batched_reset maps
+    per-env loadouts (in_axes=(0, None, 0) is per-env, not broadcast)."""
+    req_table = _default_required_table()
+
+    # Single env: non-zero loadout stored verbatim.
+    loadout = jnp.array([1, 131, 0, 0, 0, 0], dtype=jnp.int32)
+    assert loadout.shape == (MAX_JOKERS,)
+    state = J.reset_jax(jax.random.PRNGKey(3), req_table, loadout)
+    assert jnp.array_equal(state.jokers, loadout)
+
+    # Batched: per-env DISTINCT loadouts each stored at the matching env index.
+    n = 4
+    loadouts = jnp.stack([
+        jnp.array([1, 131, 0, 0, 0, 0], dtype=jnp.int32),
+        jnp.array([2, 0, 0, 0, 0, 0], dtype=jnp.int32),
+        jnp.array([0, 0, 0, 0, 0, 7], dtype=jnp.int32),
+        jnp.array([3, 4, 5, 0, 0, 0], dtype=jnp.int32),
+    ])
+    states = J.batched_reset(_make_keys(n), req_table, loadouts)
+    assert states.jokers.shape == (n, MAX_JOKERS)
+    assert jnp.array_equal(states.jokers, loadouts)
 
 
 def test_batched_reset_obs_shape():
     """vmapped encode_core over batched state -> obs dict each value leading dim N."""
     keys = _make_keys(N)
     req_table = _default_required_table()
-    states = J.batched_reset(keys, req_table)
+    states = J.batched_reset(keys, req_table, _zero_jokers(N))
     batch_encode = jax.vmap(encode_core)
     obs = batch_encode(states)
     for k, v in obs.items():
@@ -245,7 +279,7 @@ def test_batched_step_shape():
     """jit(batched_step) over N envs: outputs have leading dim N."""
     keys = _make_keys(N)
     req_table = _default_required_table()
-    states = J.batched_reset(keys, req_table)
+    states = J.batched_reset(keys, req_table, _zero_jokers(N))
 
     # Use action 0 (PLAY first card) for all envs
     action_ids = jnp.zeros(N, dtype=jnp.int32)
@@ -274,7 +308,7 @@ def test_batched_step_vmap_consistency():
     N_CHECK = 8
     keys = _make_keys(N_CHECK, seed=7)
     req_table = _default_required_table()
-    states = J.batched_reset(keys, req_table)
+    states = J.batched_reset(keys, req_table, _zero_jokers(N_CHECK))
 
     # Mix of action types:
     #   lanes 0..1:  single-card PLAY  (ids 0, 1)
@@ -294,7 +328,7 @@ def test_batched_step_vmap_consistency():
 
     for i in range(N_CHECK):
         lane_state = jax.tree_util.tree_map(lambda x: x[i], states)
-        single_next, single_reward, single_done, single_sigs = J.step_with_action(
+        single_next, single_reward, single_done, single_sigs = _JIT_STEP_ACTION(
             lane_state, action_ids[i])
 
         # Compare state scalars
@@ -357,7 +391,7 @@ def _force_to_done(state, req_table):
             break
         aid = int(play_ids[0])
         verb, sel = J.decode_action(jnp.int32(aid))
-        cur, last_sigs = J.step(cur, verb, sel)
+        cur, last_sigs = _JIT_STEP(cur, verb, sel)
     return cur, last_sigs
 
 
@@ -372,7 +406,7 @@ def test_auto_reset_returns_fresh_state():
 
     # Now call step_with_action on done_state with any action:
     # the auto-reset should give us a fresh state despite done=True input.
-    final_state, reward, done_flag, signals = J.step_with_action(done_state, jnp.int32(0))
+    final_state, reward, done_flag, signals = _JIT_STEP_ACTION(done_state, jnp.int32(0))
 
     # The returned STATE should be a fresh episode
     assert int(final_state.ante) == 1, f"Expected ante=1 after auto-reset, got {int(final_state.ante)}"
@@ -410,7 +444,7 @@ def test_auto_reset_signals_reflect_terminal():
             break
         aid = int(play_ids[0])
         verb, sel = J.decode_action(jnp.int32(aid))
-        next_s, sigs = J.step(cur, verb, sel)
+        next_s, sigs = _JIT_STEP(cur, verb, sel)
         if bool(next_s.done):
             # Already went done before hands_left==1; that's fine — pick this terminal
             cur = next_s
@@ -430,10 +464,10 @@ def test_auto_reset_signals_reflect_terminal():
         mask = np.asarray(legal_mask_core(cur), dtype=bool)
         play_ids = np.nonzero(mask[:PLAY_N])[0]
         aid = int(play_ids[0]) if len(play_ids) > 0 else 0
-        term_state, term_sigs = J.step(cur, *J.decode_action(jnp.int32(aid)))
+        term_state, term_sigs = _JIT_STEP(cur, *J.decode_action(jnp.int32(aid)))
         # term_state.done must be True (either LOST or cleared/advanced)
         # Now call step_with_action on cur (the pre-terminal state)
-        final_state, reward, done_flag, signals = J.step_with_action(cur, jnp.int32(aid))
+        final_state, reward, done_flag, signals = _JIT_STEP_ACTION(cur, jnp.int32(aid))
 
         # done_flag must be True (the transition produced a terminal)
         assert bool(done_flag), (
@@ -470,7 +504,7 @@ def test_auto_reset_signals_reflect_terminal():
             )
     else:
         # cur is already done from the driving loop — still test step_with_action
-        final_state, reward, done_flag, signals = J.step_with_action(cur, jnp.int32(0))
+        final_state, reward, done_flag, signals = _JIT_STEP_ACTION(cur, jnp.int32(0))
         assert int(final_state.ante) == 1
         assert not bool(final_state.done)
 
@@ -480,7 +514,7 @@ def test_auto_reset_in_batched_step():
     N_SMALL = 4
     keys = _make_keys(N_SMALL, seed=55)
     req_table = _default_required_table()
-    states = J.batched_reset(keys, req_table)
+    states = J.batched_reset(keys, req_table, _zero_jokers(N_SMALL))
 
     # Force lane 0 to done by consuming all hands_left via step (underlying, no auto-reset)
     lane0 = jax.tree_util.tree_map(lambda x: x[0], states)
@@ -522,10 +556,26 @@ def test_batched_step_large_n_jit():
     """Full N=1024 batched step under jit: smoke test."""
     keys = _make_keys(N)
     req_table = _default_required_table()
-    states = jax.jit(J.batched_reset)(keys, req_table)
+    states = jax.jit(J.batched_reset)(keys, req_table, _zero_jokers(N))
     action_ids = jnp.zeros(N, dtype=jnp.int32)
     next_states, rewards, dones, signals = jax.jit(J.batched_step)(states, action_ids)
     assert next_states.ante.shape == (N,)
     assert rewards.shape == (N,)
     assert dones.shape == (N,)
     assert signals.score.shape == (N,)
+
+
+def test_batched_reset_accepts_jokers_and_empty_is_phase1():
+    import jax, jax.numpy as jnp
+    from balatro_rl.engine_jax.step import batched_reset, reset_jax
+    from balatro_rl.engine_jax.curriculum import build_required_table
+    from balatro_rl.envs.actions import MAX_JOKERS
+    n = 4
+    keys = jax.random.split(jax.random.PRNGKey(0), n)
+    rt = build_required_table(1.0)
+    jk = jnp.zeros((n, MAX_JOKERS), dtype=jnp.int32)
+    st = batched_reset(keys, rt, jk)
+    assert st.jokers.shape == (n, MAX_JOKERS)
+    # Single-env reset_jax with default jokers matches the all-zero loadout.
+    s0 = reset_jax(keys[0], rt)
+    assert int(jnp.sum(s0.jokers)) == 0

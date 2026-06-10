@@ -24,6 +24,7 @@ Keys that are always zero in Python (during a core play-only run, no shop):
 """
 from __future__ import annotations
 
+import jax
 import numpy as np
 import pytest
 
@@ -35,6 +36,10 @@ from balatro_rl.engine_jax import step as J
 from balatro_rl.engine_jax.config import MAX_HAND
 from balatro_rl.engine_jax.obs import encode_core, legal_mask_core
 from tests.engine_jax.parity_util import deck_from_python
+
+# step now folds the full joker pipeline (Task 2.6), so an UNCOMPILED trace costs
+# ~0.5s — jit once at module level so the per-step loop below runs in ~ms.
+_JIT_STEP = jax.jit(J.step)
 
 N_SEEDS = 40
 MAX_STEPS = 30
@@ -168,7 +173,7 @@ def _run_policy(pick_action_id, label: str) -> int:
             sel = _sel_mask(idxs)
 
             gs2, _info = engine.step(gs, (verb, tuple(idxs)))
-            cs2, sig = J.step(cs, int(verb), sel)
+            cs2, sig = _JIT_STEP(cs, int(verb), sel)
 
             info = f"{label} seed={seed} step={step_i}"
 
@@ -218,3 +223,21 @@ def test_obs_parity_discard_policy():
 
     compared = _run_policy(pick, label="discard-policy")
     assert compared > 0, "no states were compared"
+
+
+def test_obs_joker_keys_match_python():
+    from balatro_rl.engine_jax.step import reset
+    from balatro_rl.engine_jax.obs import encode_core
+    from balatro_rl.envs.actions import MAX_JOKERS
+    # Build a JAX state with a fixed loadout and check the joker obs keys.
+    jk = np.zeros(MAX_JOKERS, np.int32); jk[0] = 1; jk[1] = 131  # Joker, The Duo
+    ranks = [r for r in range(2,15) for _ in range(4)]; suits = [s for _ in range(2,15) for s in range(4)]
+    st = reset(ranks, suits, required=300, jokers=jk)
+    obs = encode_core(st)
+    assert int(np.asarray(obs["joker_types"])[0]) == 1
+    assert int(np.asarray(obs["joker_types"])[1]) == 131
+    assert float(np.asarray(obs["joker_mask"])[0]) == 1.0 and float(np.asarray(obs["joker_mask"])[1]) == 1.0
+    assert float(np.asarray(obs["joker_mask"])[2]) == 0.0
+    assert float(np.asarray(obs["joker_counter"])[0]) == 0.0   # stateless -> symlog(0)=0
+    assert float(np.asarray(obs["global"])[10]) == 2.0          # joker count
+    assert np.all(np.asarray(obs["joker_types"])[2:] == 0)      # empty slots stay 0

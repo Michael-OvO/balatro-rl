@@ -59,7 +59,12 @@ from tests.engine_jax.parity_util import (
     deck_from_python,
 )
 
+import jax
 import jax.numpy as jnp
+
+# step now folds the full joker pipeline (Task 2.6), so an UNCOMPILED trace costs
+# ~0.5s — jit once at module level so the per-step loops below run in ~ms.
+_JIT_STEP = jax.jit(J.step)
 
 # Tolerances
 WITHIN_ATOL = 1e-5
@@ -170,7 +175,7 @@ def test_within_blind_reward_parity():
             sel = _sel_mask(idxs)
 
             gs2, info = engine.step(gs, (verb, tuple(idxs)))
-            cs2, sig = J.step(cs, int(verb), sel)
+            cs2, sig = _JIT_STEP(cs, int(verb), sel)
 
             # Break at any boundary — only within-blind transitions here.
             if gs2.phase in (Phase.SHOP, Phase.WON) or gs2.won or gs2.phase == Phase.LOST:
@@ -228,7 +233,7 @@ def test_episode_reward_parity_with_boundaries():
             sel = _sel_mask(idxs)
 
             gs2, info = engine.step(gs, (verb, tuple(idxs)))
-            cs2, sig = J.step(cs, int(verb), sel)
+            cs2, sig = _JIT_STEP(cs, int(verb), sel)
 
             # ---- Determine oracle's cleared / won flags ----
             py_cleared = bool(info.get("cleared", False))
@@ -312,7 +317,7 @@ def test_win_reward_parity():
             sel = _sel_mask(idxs)
 
             gs2, info = engine.step(gs, (verb, tuple(idxs)))
-            cs2, sig = J.step(cs, int(verb), sel)
+            cs2, sig = _JIT_STEP(cs, int(verb), sel)
 
             py_cleared = bool(info.get("cleared", False))
             py_won     = bool(gs2.done and gs2.won)
@@ -366,7 +371,7 @@ def test_shaped_core_jit_vmap():
     aid  = _lowest_play_id(mask)
     verb, idxs = decode(aid)
     sel  = _sel_mask(idxs)
-    cs2, sig = J.step(cs, int(verb), sel)
+    cs2, sig = _JIT_STEP(cs, int(verb), sel)
 
     # jit
     jitted = jax.jit(shaped_core)

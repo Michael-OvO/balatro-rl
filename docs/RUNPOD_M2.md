@@ -136,9 +136,40 @@ proven bit-for-bit equal to the Python oracle on the core loop and dropped under
 `nvidia-smi` GPU utilization (target ≥ ~80 % at ≥10k envs). The script auto-prints `nvidia-smi` when a
 CUDA device is present. Install `jaxlib-cuda` on the box first (the pod historically shipped CPU jaxlib).
 
-**Scope note:** Phase 1 is the CORE loop only (deal → play/discard → score → blind/ante → win/lose).
-Jokers/shop/consumables/vouchers/bosses are Phase 2+; the Python engine remains the oracle and the home
-of those features. The agentic-LLM track plugs into the same batched engine from Phase 1 onward.
+### Phase-2 update (2026-06-09) — jokers (branch `e7-jax-engine-phase02`)
+
+The JAX engine now scores **~45 "pure-scoring" jokers** on plain cards — flat/suit/rank/face additive,
+hand-contains ±/× mult (Jolly…, Sly…, The Duo/Trio/Family/Order/Tribe), retriggers (Hack, Sock & Buskin),
+rule flags (Splash, Pareidolia), held-card (Baron, Blackboard), and context-linear (Banner, Abstract,
+Bull, Blue Joker, Supernova, Card Sharp, …) — as a branchless `lax.switch` ordered fold (`engine_jax/jokers.py::score_with_jokers`)
+wired into `step`. It is **proven bit-for-bit equal to the Python oracle** at two levels:
+- **Gate A (component):** `score_with_jokers` vs `engine.scoring.score_play` over **1000** randomized
+  (loadout × hand × held × levels × context) cases — zero mismatches — with a coverage assertion that
+  **every** in-scope joker fires, golden oracle-free values, a fold-order adversarial test, and a
+  negative control (`tests/engine_jax/test_joker_scoring_parity.py`).
+- **Gate B (episode):** the **same fixed loadout** injected into both engines; within-blind rollout
+  parity on state + ordered slots + core **and** joker obs keys + shaped reward, across one loadout per
+  family + a high-interaction mix (`tests/engine_jax/test_core_parity_gate.py`).
+
+Dropped under PPO via `JaxVectorEnv(joker_loadout=[...])` / `TrainConfig.joker_loadout`; the learning
+smoke (`tests/agent/test_jax_engine_smoke.py`) trains end-to-end **with jokers** at finite losses.
+Acquisition stays out of scope (the loadout is fixed for the run; the shop is Phase 3).
+
+**Throughput caveat — read before benchmarking jokers on CPU.** The **training** path compiles
+`batched_step` *once* (~18 s on CPU in the PPO smoke) and trains fine, because PPO calls `batched_step`
+per step (no `lax.scan`). The `scripts/bench_jax_engine.py` micro-benchmark, however, wraps `batched_step`
+in a 200-step `lax.scan`, and with the **statically-unrolled** joker fold (~300 `lax.switch` sites) XLA
+takes **> 1 hour to compile** that scan module on CPU (it prints "Very slow compile"). So the
+**with-jokers env-steps/s number is deferred to a GPU box** (faster compile; and the per-step path is
+what training actually uses), alongside the still-pending Phase-1 GPU number. `BENCH_JOKERS=1,131,3,109,52`
+sets a loadout; keep `BENCH_SIZES`/`BENCH_STEPS` small on CPU, or just rely on the PPO smoke. The future
+fix for a fast scan-benchmark is to convert the fold's per-card/per-slot loops to `lax.fori_loop`
+(shrinks the graph) — deferred to keep the parity-proven fold byte-for-byte unchanged.
+
+**Scope note (updated for Phase 2):** Phases 1–2 cover the core loop + ~45 pure-scoring jokers on plain
+cards. **Phase 3+:** card enhancements/editions/seals, scaling/economy/RNG jokers, Blueprint,
+Steel/Stone Joker, and the shop/economy/acquisition/vouchers/packs/bosses. The Python engine remains the
+oracle and the home of those features; the agentic-LLM track plugs into the same batched engine.
 
 **Legacy 8B/PPO-sweep guidance (still valid for the Python-engine path):** right-size or it runs for
 weeks — a GiGPO step (128 eps × 350 turns) is >30 min → 600 steps ≈ 2 weeks; use `EPOCHS≈8` (~32 steps)

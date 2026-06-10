@@ -152,6 +152,38 @@ def _card_chip(ranks) -> jnp.ndarray:
     return chip.astype(jnp.int32)
 
 
+def _scoring_mask(ht, ranks, m):
+    """The per-hand-type scoring-card mask (bool[5]) matching evaluate()'s scoring_idx.
+    `ht` is the detected hand type; `m` is the played bool[5] mask."""
+    ranks = jnp.asarray(ranks).astype(jnp.int32)
+    m = jnp.asarray(m).astype(jnp.bool_)
+    mi = m.astype(jnp.int32)
+    rank_bucket = ranks - 2
+    rank_oh = (rank_bucket[:, None] == jnp.arange(_N_RANK_BUCKETS)[None, :]).astype(jnp.int32) * mi[:, None]
+    rank_counts = jnp.sum(rank_oh, axis=0)
+    safe_bucket = jnp.clip(rank_bucket, 0, _N_RANK_BUCKETS - 1)
+    slot_rank_count = rank_counts[safe_bucket] * mi
+    mask_eq2 = (slot_rank_count == 2) & m
+    mask_eq3 = (slot_rank_count == 3) & m
+    mask_eq4 = (slot_rank_count == 4) & m
+    valid_rank = jnp.where(m, ranks, jnp.int32(-1))
+    hi_rank = jnp.max(valid_rank)
+    is_hi = (valid_rank == hi_rank) & m
+    first_hi = jnp.argmax(is_hi.astype(jnp.int32))
+    mask_high = jnp.zeros_like(m).at[first_hi].set(True) & m
+    mask_all = m
+    is_pair_like2 = (ht == PAIR) | (ht == TWO_PAIR)
+    is_all = ((ht == STRAIGHT) | (ht == FLUSH) | (ht == FULL_HOUSE)
+              | (ht == STRAIGHT_FLUSH) | (ht == FIVE_OF_A_KIND)
+              | (ht == FLUSH_HOUSE) | (ht == FLUSH_FIVE))
+    sm = mask_high
+    sm = jnp.where(is_pair_like2, mask_eq2, sm)
+    sm = jnp.where(ht == THREE_OF_A_KIND, mask_eq3, sm)
+    sm = jnp.where(ht == FOUR_OF_A_KIND, mask_eq4, sm)
+    sm = jnp.where(is_all, mask_all, sm)
+    return sm
+
+
 def score_core(ranks, suits, mask, levels):
     """Base scoring for up to 5 played cards (no jokers, plain cards).
 
@@ -191,51 +223,8 @@ def score_core(ranks, suits, mask, levels):
     base_chips = HAND_BASE_CHIPS[ht] + HAND_INC_CHIPS[ht] * (lvl - 1)
     mult = HAND_BASE_MULT[ht] + HAND_INC_MULT[ht] * (lvl - 1)
 
-    # --- rank histogram (same quantities detect_hand_type uses) -------------
-    mi = m.astype(jnp.int32)
-    rank_bucket = ranks - 2  # may be -2 for empty (rank 0); masked out below.
-    rank_oh = (rank_bucket[:, None] == jnp.arange(_N_RANK_BUCKETS)[None, :])
-    rank_oh = rank_oh.astype(jnp.int32) * mi[:, None]
-    rank_counts = jnp.sum(rank_oh, axis=0)  # int32[13]
-
-    # Per-slot count of that slot's own rank (gather; 0 for empty slots).
-    safe_bucket = jnp.clip(rank_bucket, 0, _N_RANK_BUCKETS - 1)
-    slot_rank_count = rank_counts[safe_bucket] * mi  # int32[5]
-
     # --- scoring mask per hand-type category (mirror evaluate's scoring_idx) -
-    # n-of-a-kind hands score exactly the cards of the forming rank, by count:
-    #   PAIR/TWO_PAIR -> count==2; THREE -> count==3; FOUR -> count==4.
-    mask_eq2 = (slot_rank_count == 2) & m
-    mask_eq3 = (slot_rank_count == 3) & m
-    mask_eq4 = (slot_rank_count == 4) & m
-
-    # HIGH_CARD -> only the single highest-rank valid card; ties resolve to the
-    # FIRST (lowest-index) such slot, matching Python's max(..., key=rank) which
-    # returns the first argmax. Build a one-hot at that slot.
-    valid_rank = jnp.where(m, ranks, jnp.int32(-1))
-    hi_rank = jnp.max(valid_rank)
-    is_hi = (valid_rank == hi_rank) & m
-    # First True index (argmax of the boolean picks the lowest index that is True).
-    first_hi = jnp.argmax(is_hi.astype(jnp.int32))
-    mask_high = jnp.zeros_like(m).at[first_hi].set(True) & m
-
-    # All-cards hands: STRAIGHT/FLUSH/STRAIGHT_FLUSH/FULL_HOUSE/FIVE/
-    # FLUSH_HOUSE/FLUSH_FIVE all score every played card.
-    mask_all = m
-
-    # Select the scoring mask for the detected hand type. Built as a where-chain
-    # (default HIGH_CARD): each ht is exactly one category.
-    is_pair_like2 = (ht == PAIR) | (ht == TWO_PAIR)
-    is_all = (
-        (ht == STRAIGHT) | (ht == FLUSH) | (ht == FULL_HOUSE)
-        | (ht == STRAIGHT_FLUSH) | (ht == FIVE_OF_A_KIND)
-        | (ht == FLUSH_HOUSE) | (ht == FLUSH_FIVE)
-    )
-    scoring_mask = mask_high
-    scoring_mask = jnp.where(is_pair_like2, mask_eq2, scoring_mask)
-    scoring_mask = jnp.where(ht == THREE_OF_A_KIND, mask_eq3, scoring_mask)
-    scoring_mask = jnp.where(ht == FOUR_OF_A_KIND, mask_eq4, scoring_mask)
-    scoring_mask = jnp.where(is_all, mask_all, scoring_mask)
+    scoring_mask = _scoring_mask(ht, ranks, m)
 
     # --- sum the chip value of the scoring cards ----------------------------
     card_chips = _card_chip(ranks)

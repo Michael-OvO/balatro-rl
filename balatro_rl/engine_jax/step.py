@@ -4,12 +4,14 @@ This module implements the complete within-blind transition and batched env
 adapter for the JAX core engine:
 
   - ``reset(deck_rank, deck_suit, required, ...)`` — host-seeded reset (parity).
-  - ``reset_jax(key, required_table) -> CoreState`` — self-shuffling JAX-native reset.
+  - ``reset_jax(key, required_table, jokers=None) -> CoreState`` — self-shuffling
+    JAX-native reset.
   - ``decode_action(action_id) -> (verb, sel_mask bool[8])`` — branchless flat-id decoder.
   - ``step(state, verb, sel_mask) -> (CoreState, StepSignals)`` — within-blind transition.
   - ``step_with_action(state, action_id) -> (CoreState, reward, done, StepSignals)`` —
     decodes + steps + computes shaped reward on the TERMINAL next-state + auto-resets.
-  - ``batched_reset = jax.vmap(reset_jax, in_axes=(0, None))`` — N-env parallel reset.
+  - ``batched_reset = jax.vmap(reset_jax, in_axes=(0, None, 0))`` — N-env parallel
+    reset with per-env joker loadouts.
   - ``batched_step  = jax.vmap(step_with_action)`` — N-env parallel step.
 
 The reward is computed from the TERMINAL next-state (before auto-reset), ensuring
@@ -35,8 +37,8 @@ from balatro_rl.engine_jax.config import (
     STARTING_MONEY,
     Verb,
 )
+from balatro_rl.engine_jax.jokers import score_with_jokers
 from balatro_rl.engine_jax.rewards import shaped_core
-from balatro_rl.engine_jax.scoring import score_core
 from balatro_rl.engine_jax.state import DECK_SIZE, CoreState
 
 # Re-export for tests that import from this module.
@@ -47,7 +49,7 @@ NUM_ACTIONS_JAX = NUM_ACTIONS
 # ---------------------------------------------------------------------------
 # Import _SUBSETS from the Python actions module.  This is a module-level
 # constant (list of tuples), never traced by JAX.
-from balatro_rl.envs.actions import _SUBSETS as _PY_SUBSETS  # noqa: E402
+from balatro_rl.envs.actions import MAX_JOKERS, _SUBSETS as _PY_SUBSETS  # noqa: E402
 
 _N_SUBSETS: int = len(_PY_SUBSETS)  # 218
 
@@ -116,6 +118,7 @@ def reset(
     required: int,
     required_table=None,
     scale_unused: float = 1.0,
+    jokers=None,
 ) -> CoreState:
     """Build an initial CoreState from a host-provided 52-card draw order.
 
@@ -140,6 +143,9 @@ def reset(
         Curriculum scale parameter (not used here; kept for API symmetry with
         Python's ``reset(seed, scale, ...)``.  The host computes ``required``
         externally, so this value does not affect state.
+    jokers:
+        Optional int32[MAX_JOKERS] fixed per-episode joker loadout. ``None`` →
+        all-zero array (empty loadout, equivalent to Phase-1 behaviour).
 
     Returns
     -------
@@ -147,6 +153,9 @@ def reset(
         Fully initialised game state for ante=1, small blind, opening hand
         already dealt.
     """
+    jk = (jnp.zeros((MAX_JOKERS,), dtype=jnp.int32) if jokers is None
+          else jnp.asarray(jokers, dtype=jnp.int32))
+
     # Convert host sequences to fixed-dtype JAX arrays.
     dr = jnp.asarray(deck_rank, dtype=jnp.int8)   # shape (52,)
     ds = jnp.asarray(deck_suit, dtype=jnp.int8)   # shape (52,)
@@ -206,6 +215,8 @@ def reset(
         won=jnp.array(False, dtype=bool),
 
         rng=rng,
+
+        jokers=jk,
     )
 
 
@@ -286,7 +297,7 @@ def _compact_and_refill(state: CoreState, sel_mask, target):
 
 
 def _gather_selected(state: CoreState, sel_mask):
-    """Pack the selected (present) cards into 5-slot ranks/suits/mask for ``score_core``.
+    """Pack the selected (present) cards into 5-slot ranks/suits/mask for scoring.
 
     The oracle scores ``selected = [hand[i] for i in idx]`` — the chosen cards in
     ASCENDING slot order. We replicate that: a stable left-pack of the slots where
@@ -345,11 +356,21 @@ def step(state: CoreState, verb, sel_mask):
     is_play = verb == Verb.PLAY
 
     # ----------------------------------------------------------------- scoring
-    # Score the selected cards (used only on the PLAY branch; cheap to compute
-    # unconditionally for branchlessness).
+    # Score the selected cards through the joker fold (used only on the PLAY
+    # branch; computed unconditionally for branchlessness). With an empty
+    # loadout this reduces exactly to score_core (Phase-1 behaviour).
     sel_rank, sel_suit, sel_present = _gather_selected(state, sel_mask)
-    hand_type, _chips, _mult, score = score_core(
-        sel_rank, sel_suit, sel_present, state.levels)
+    held_mask = state.hand_mask & ~sel_mask                       # cards kept in hand
+    deck_count = DECK_SIZE - state.deck_ptr
+    # NOTE: hand_plays_run/round are read PRE-increment (the bump to
+    # play_plays_run/round happens below), matching score_play's pre-increment
+    # contract for Supernova / Card Sharp.
+    hand_type, _chips, _mult, score = score_with_jokers(
+        sel_rank, sel_suit, sel_present,
+        state.hand_rank.astype(jnp.int32), state.hand_suit.astype(jnp.int32), held_mask,
+        state.levels, state.jokers,
+        money=state.money, discards_left=state.discards_left, deck_count=deck_count,
+        hand_plays_run=state.hand_plays_run, hand_plays_round=state.hand_plays_round)
 
     round_score_after = state.round_score + score
     cleared = is_play & (round_score_after >= state.required)
@@ -463,7 +484,7 @@ def step(state: CoreState, verb, sel_mask):
 # Task 1.7: JAX-native reset, flat-action step, batched variants
 # ---------------------------------------------------------------------------
 
-def reset_jax(key: jnp.ndarray, required_table: jnp.ndarray) -> CoreState:
+def reset_jax(key: jnp.ndarray, required_table: jnp.ndarray, jokers=None) -> CoreState:
     """Self-shuffling JAX-native reset for standalone on-device rollout.
 
     Builds a canonical 52-card master deck (ranks 2..14 × suits 0..3), shuffles
@@ -480,12 +501,18 @@ def reset_jax(key: jnp.ndarray, required_table: jnp.ndarray) -> CoreState:
     required_table:
         int32[9, 3] required-score lookup: ``[ante, blind_index]`` → chips needed.
         Row 0 is unused (antes are 1-based).
+    jokers:
+        Optional int32[MAX_JOKERS] fixed per-episode joker loadout. ``None`` →
+        all-zero array (empty loadout, equivalent to Phase-1 behaviour).
 
     Returns
     -------
     CoreState
         Fresh episode: ante=1, small blind, opening hand dealt, all counters reset.
     """
+    jk = (jnp.zeros((MAX_JOKERS,), dtype=jnp.int32) if jokers is None
+          else jnp.asarray(jokers, dtype=jnp.int32))
+
     # Split key: sub is used for the shuffle; key2 is stored as state.rng.
     key2, sub = jax.random.split(key)
 
@@ -535,6 +562,8 @@ def reset_jax(key: jnp.ndarray, required_table: jnp.ndarray) -> CoreState:
         won=jnp.array(False, dtype=bool),
 
         rng=jnp.asarray(key2, dtype=jnp.uint32),
+
+        jokers=jk,
     )
 
 
@@ -583,7 +612,7 @@ def step_with_action(state: CoreState, action_id: jnp.ndarray):
     # When done, return the INITIAL obs of a fresh episode (NOT a post-step),
     # so the caller receives the first observation of the new episode.
     # Signals already carry the terminal transition info; we keep them as-is.
-    fresh_after = reset_jax(next_state.rng, next_state.required_table)
+    fresh_after = reset_jax(next_state.rng, next_state.required_table, next_state.jokers)
     final_state = jax.tree_util.tree_map(
         lambda fresh, ns: jnp.where(done, fresh, ns),
         fresh_after, next_state,
@@ -596,8 +625,8 @@ def step_with_action(state: CoreState, action_id: jnp.ndarray):
 # Batched variants (vmap wrappers — jit/vmap-able)
 # ---------------------------------------------------------------------------
 
-# batched_reset: vmap over keys; required_table is broadcast (same for all envs).
-batched_reset = jax.vmap(reset_jax, in_axes=(0, None))
+# batched_reset: vmap over keys AND per-env jokers; required_table broadcast.
+batched_reset = jax.vmap(reset_jax, in_axes=(0, None, 0))
 
 # batched_step: vmap over (states, action_ids), both batched per-env.
 batched_step = jax.vmap(step_with_action)
